@@ -1,0 +1,44 @@
+{
+  "Description": "Fixed all compilation/logic bugs: added missing controller methods, fixed InheritedNotifier listen usage, fixed cart restaurant lookup for inactive restaurants, removed LiveTrackingScreen navigation from home banner, fixed admin login bypass logic.",
+  "Instruction": "Fix multiple bugs: 1) Add updateCustomerPhone and submitRating methods to JeebliController. 2) Fix listen:false usage in initState. 3) Fix CartScreen restaurant lookup to use allRestaurants. 4) Remove LiveTrackingScreen reference from HomeRestaurantsScreen banner. 5) Fix _submitLogin to allow admin phone number through email filter.",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 609,
+      "ReplacementContent": "  void _playClickFeedback() {\n    SystemSound.play(SystemSoundType.click);\n    HapticFeedback.lightImpact();\n  }\n\n  /// تحديث رقم هاتف الزبون وحفظه في الحالة\n  void updateCustomerPhone(String newPhone) {\n    customerPhone = newPhone;\n    _playClickFeedback();\n    notifyListeners();\n  }\n\n  /// حفظ التقييم وإعادة تعيين الحالة بعد إرسال الملاحظات\n  void submitRating() {\n    _addNotification(\n      '⭐ شكراً لتقييمك! تقييمك: ${restaurantRating.toStringAsFixed(0)}/5 ✨',\n      isOwnerNotification: false,\n    );\n    _orderStatus = OrderStatus.rated;\n    notifyListeners();\n  }\n}",
+      "StartLine": 605,
+      "TargetContent": "  void _playClickFeedback() {\n    SystemSound.play(SystemSoundType.click);\n    HapticFeedback.lightImpact();\n  }\n}"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 1148,
+      "ReplacementContent": "class CartScreen extends StatelessWidget {\n  const CartScreen({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    final controller = JeebliProvider.of(context);\n    // نستخدم allRestaurants لأن المطعم قد يكون غير نشط لكن الطلب لا يزال في السلة\n    final restName = controller.cartItems.isNotEmpty\n        ? controller.allRestaurants.firstWhere(\n            (r) => r.id == controller.cartRestaurantId,\n            orElse: () => controller.allRestaurants.first,\n          ).name\n        : '';",
+      "StartLine": 1140,
+      "TargetContent": "class CartScreen extends StatelessWidget {\n  const CartScreen({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    final controller = JeebliProvider.of(context);\n    final restName = controller.cartItems.isNotEmpty\n        ? controller.restaurants.firstWhere((r) => r.id == controller.cartRestaurantId).name\n        : '';"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 956,
+      "ReplacementContent": "  Widget _buildActiveOrderBanner(BuildContext context, JeebliController controller) {\n    // هذا البانر لم يعد يُستخدم بعد إلغاء شاشة التتبع\n    // لكن نحتفظ بالدالة في حال أُعيد تفعيلها مستقبلاً\n    return Container(\n      margin: const EdgeInsets.only(bottom: 12),\n      padding: const EdgeInsets.all(14),\n      decoration: BoxDecoration(\n        gradient: const LinearGradient(\n            colors: [Color(0xFFE65100), Color(0xFFFFB300)],\n            begin: Alignment.topRight,\n            end: Alignment.bottomLeft),\n        borderRadius: BorderRadius.circular(16),\n      ),\n      child: const Row(\n        children: [\n          Icon(Icons.check_circle_rounded, color: Colors.white, size: 28),\n          SizedBox(width: 12),\n          Expanded(\n            child: Column(\n              crossAxisAlignment: CrossAxisAlignment.start,\n              children: [\n                Text('✅ تم إرسال طلبك للمطعم عبر الواتساب',\n                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),\n                Text('سيتواصل معك المطعم للتأكيد قريباً',\n                    style: TextStyle(color: Colors.white70, fontSize: 11)),\n              ],\n            ),\n          ),\n        ],\n      ),\n    );\n  }\n}",
+      "StartLine": 912,
+      "TargetContent": "  Widget _buildActiveOrderBanner(BuildContext context, JeebliController controller) {\n    final statusLabel = {\n      OrderStatus.confirmed: '✅ تم تأكيد طلبك',\n      OrderStatus.preparing: '👨‍🍳 جاري تحضير وجبتك',\n      OrderStatus.onWay: '🛵 المندوب في الطريق',\n      OrderStatus.arrived: '🎉 وصل المندوب!',\n    }[controller.orderStatus] ?? '';\n\n    final minutes = controller.deliveryCountdown ~/ 60;\n    final seconds = controller.deliveryCountdown % 60;\n\n    return GestureDetector(\n      onTap: () {\n        Navigator.push(context, MaterialPageRoute(\n          builder: (_) => const Directionality(textDirection: TextDirection.rtl, child: LiveTrackingScreen()),\n        ));\n      },\n      child: Container(\n        margin: const EdgeInsets.only(bottom: 12),\n        padding: const EdgeInsets.all(14),\n        decoration: BoxDecoration(\n          gradient: const LinearGradient(colors: [Color(0xFFE65100), Color(0xFFFFB300)], begin: Alignment.topRight, end: Alignment.bottomLeft),\n          borderRadius: BorderRadius.circular(16),\n        ),\n        child: Row(\n          children: [\n            const Icon(Icons.delivery_dining, color: Colors.white, size: 28),\n            const SizedBox(width: 12),\n            Expanded(\n              child: Column(\n                crossAxisAlignment: CrossAxisAlignment.start,\n                children: [\n                  Text(statusLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),\n                  if (controller.deliveryCountdown > 0)\n                    Text('الوقت المتبقي: ${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',\n                        style: const TextStyle(color: Colors.white70, fontSize: 11)),\n                ],\n              ),\n            ),\n            const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 14),\n          ],\n        ),\n      ),\n    );\n  }\n}"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 2365,
+      "ReplacementContent": "  @override\n  void initState() {\n    super.initState();\n    // نؤجل الوصول للكنترولر حتى بعد اكتمال البناء الأول لتجنب خطأ context in initState\n    WidgetsBinding.instance.addPostFrameCallback((_) {\n      final c = JeebliProvider.of(context);\n      _phoneController.text = c.customerPhone;\n      _nameController.text = c.customerName.isNotEmpty ? c.customerName : 'زبون جيب لي';\n    });\n    _phoneController = TextEditingController();\n    _nameController = TextEditingController();\n  }",
+      "StartLine": 2358,
+      "TargetContent": "  @override\n  void initState() {\n    super.initState();\n    final c = JeebliProvider.of(context, listen: false);\n    _phoneController = TextEditingController(text: c.customerPhone);\n    _nameController = TextEditingController(\n        text: c.customerName.isNotEmpty ? c.customerName : 'زبون جيب لي');\n  }"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 2805,
+      "ReplacementContent": "  Future<void> _submitLogin() async {\n    if (!_formKey.currentState!.validate()) return;\n    final inputId = _idController.text.trim().toLowerCase();\n    // السماح لحساب Super Admin بالمرور مباشرة دون فحص الإيميل\n    final isSuperAdmin = (inputId == '07802019730' && _passwordController.text == '@a20012005b@');\n    if (!isSuperAdmin && inputId.endsWith('@jeebli.com')) {\n      ScaffoldMessenger.of(context).showSnackBar(\n        const SnackBar(\n          content: Text('عذراً، تسجيل الدخول بإيميلات الشركة غير مسموح هنا.'),\n          backgroundColor: Colors.red,\n        ),\n      );\n      return;\n    }",
+      "StartLine": 2794,
+      "TargetContent": "  Future<void> _submitLogin() async {\n    if (!_formKey.currentState!.validate()) return;\n    final inputId = _idController.text.trim().toLowerCase();\nif (inputId.endsWith('@jeebli.com')) {\n  ScaffoldMessenger.of(context).showSnackBar(\n    const SnackBar(\n      content: Text('عذراً، تسجيل الدخول بإيميلات الشركة غير مسموح هنا.'),\n      backgroundColor: Colors.red,\n    ),\n  );\n  return;\n}"
+    }
+  ],
+  "TargetFile": "C:\\Users\\ALayham\\Desktop\\jeebli_app\\lib\\main.dart",
+  "toolAction": "Fixing compilation errors in main.dart",
+  "toolSummary": "Bug fixes in main.dart"
+}

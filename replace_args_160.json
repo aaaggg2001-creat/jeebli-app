@@ -1,0 +1,10 @@
+{
+  "AllowMultiple": false,
+  "Description": "Add import for super_admin_screen.dart file",
+  "EndLine": 9,
+  "Instruction": "Add import of super_admin_screen.dart at the top of main.dart",
+  "ReplacementContent": "import 'package:flutter/material.dart';\nimport 'package:flutter/services.dart';\nimport 'package:url_launcher/url_launcher.dart';\nimport 'super_admin_screen.dart'; // لوحة الإدارة العليا - تُستدعى للمستخدم الأدمن\n\n",
+  "StartLine": 6,
+  "TargetContent": "import 'package:flutter/material.dart';\nimport 'package:flutter/services.dart';\nimport 'package:url_launcher/url_launcher.dart';\n\n",
+  "TargetFile": "c:\\Users\\ALayham\\Desktop\\jeebli_app\\lib\\main.dart"
+}

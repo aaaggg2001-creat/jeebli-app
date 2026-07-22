@@ -1,0 +1,23 @@
+{
+  "Description": "Fixed unnecessary triple underscores in super_admin_screen.dart error builders.",
+  "Instruction": "Replace triple underscores with single underscore in error builders",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 221,
+      "ReplacementContent": "              borderRadius: BorderRadius.circular(10),\n              child: Image.network(rest.imageUrl,\n                  width: 50, height: 50, fit: BoxFit.cover,\n                  errorBuilder: (_, e, __) =>\n                      Container(width: 50, height: 50, color: Colors.grey[800],\n                          child: const Icon(Icons.store, color: Colors.grey))),\n            ),",
+      "StartLine": 215,
+      "TargetContent": "              borderRadius: BorderRadius.circular(10),\n              child: Image.network(rest.imageUrl,\n                  width: 50, height: 50, fit: BoxFit.cover,\n                  errorBuilder: (_, __, ___) =>\n                      Container(width: 50, height: 50, color: Colors.grey[800],\n                          child: const Icon(Icons.store, color: Colors.grey))),\n            ),"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 608,
+      "ReplacementContent": "            ClipRRect(\n              borderRadius: BorderRadius.circular(8),\n              child: Image.network(prod.imageUrl,\n                  width: 48, height: 48, fit: BoxFit.cover,\n                  errorBuilder: (_, e, __) => Container(\n                      width: 48, height: 48,\n                      color: Colors.grey[800],\n                      child: const Icon(Icons.fastfood, color: Colors.grey))),\n            ),",
+      "StartLine": 600,
+      "TargetContent": "            ClipRRect(\n              borderRadius: BorderRadius.circular(8),\n              child: Image.network(prod.imageUrl,\n                  width: 48, height: 48, fit: BoxFit.cover,\n                  errorBuilder: (_, __, ___) => Container(\n                      width: 48, height: 48,\n                      color: Colors.grey[800],\n                      child: const Icon(Icons.fastfood, color: Colors.grey))),\n            ),"
+    }
+  ],
+  "TargetFile": "C:\\Users\\ALayham\\Desktop\\jeebli_app\\lib\\super_admin_screen.dart",
+  "toolAction": "Fixing lint in super_admin_screen",
+  "toolSummary": "Fixing lint warnings"
+}

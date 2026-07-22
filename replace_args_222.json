@@ -1,0 +1,37 @@
+{
+  "Description": "Fixed analyzer warnings: removed unused _deliveryTimer and _deliveryCountdown fields (they were leftover from the removed tracking feature), and replaced unnecessary underscores in error builders.",
+  "Instruction": "Remove unused _deliveryTimer and _deliveryCountdown fields. Replace unnecessary triple underscores with _.",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 178,
+      "ReplacementContent": "  // حالة الطلب - تم إلغاء التتبع الحي، نبقي على idle فقط\n  OrderStatus _orderStatus = OrderStatus.idle;\n  List<AppNotification> notifications = [];\n  int unreadNotifications = 0;",
+      "StartLine": 173,
+      "TargetContent": "  // حالة الطلب والتتبع\n  OrderStatus _orderStatus = OrderStatus.idle;\n  int _deliveryCountdown = 0;\n  Timer? _deliveryTimer;\n  List<AppNotification> notifications = [];\n  int unreadNotifications = 0;"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 198,
+      "ReplacementContent": "  int get currentTab => _currentTab;\n  String get selectedCategoryId => _selectedCategoryId;\n  Restaurant? get activeRestaurant => _activeRestaurant;\n  OrderStatus get orderStatus => _orderStatus;\n  int get deliveryCountdown => 0; // إلغاء التتبع — دائماً صفر\n  String get lastOrderToken => _lastOrderToken;",
+      "StartLine": 192,
+      "TargetContent": "  int get currentTab => _currentTab;\n  String get selectedCategoryId => _selectedCategoryId;\n  Restaurant? get activeRestaurant => _activeRestaurant;\n  OrderStatus get orderStatus => _orderStatus;\n  int get deliveryCountdown => _deliveryCountdown;\n  String get lastOrderToken => _lastOrderToken;"
+    },
+    {
+      "AllowMultiple": true,
+      "EndLine": 860,
+      "ReplacementContent": "                  errorBuilder: (_, e, __) => Container(height: 155, color: Colors.orange[50], child: const Icon(Icons.restaurant, color: Colors.orange, size: 50))),",
+      "StartLine": 840,
+      "TargetContent": "                  errorBuilder: (_, __, ___) => Container(height: 155, color: Colors.orange[50], child: const Icon(Icons.restaurant, color: Colors.orange, size: 50))),"
+    },
+    {
+      "AllowMultiple": true,
+      "EndLine": 1083,
+      "ReplacementContent": "                              errorBuilder: (_, e, __) => Container(width: 88, height: 88, color: Colors.grey[100]),",
+      "StartLine": 1078,
+      "TargetContent": "                              errorBuilder: (_, __, ___) => Container(width: 88, height: 88, color: Colors.grey[100]),"
+    }
+  ],
+  "TargetFile": "C:\\Users\\ALayham\\Desktop\\jeebli_app\\lib\\main.dart",
+  "toolAction": "Fixing analyzer warnings",
+  "toolSummary": "Fixing lint warnings"
+}

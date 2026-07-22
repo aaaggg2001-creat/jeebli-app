@@ -1,0 +1,12 @@
+{
+  "AllowMultiple": false,
+  "Description": "Fixed the last remaining lint warning by using named parameters instead of underscores.",
+  "EndLine": 855,
+  "Instruction": "Fix unnecessary underscores in the last error builder",
+  "ReplacementContent": "                                    errorBuilder: (ctx2, err, stack) => Container(height: 155, color: Colors.orange[50], child: const Icon(Icons.restaurant, color: Colors.orange, size: 50))),",
+  "StartLine": 855,
+  "TargetContent": "                                    errorBuilder: (_, e, __) => Container(height: 155, color: Colors.orange[50], child: const Icon(Icons.restaurant, color: Colors.orange, size: 50))),",
+  "TargetFile": "C:\\Users\\ALayham\\Desktop\\jeebli_app\\lib\\main.dart",
+  "toolAction": "Fixing last lint warning",
+  "toolSummary": "Last lint fix"
+}

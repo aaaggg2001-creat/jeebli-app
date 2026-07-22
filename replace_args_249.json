@@ -1,0 +1,30 @@
+{
+  "Description": "Fixed remaining unnecessary_underscores warnings in main.dart.",
+  "Instruction": "Fix unnecessary underscores in error builders and separator builder",
+  "ReplacementChunks": [
+    {
+      "AllowMultiple": false,
+      "EndLine": 856,
+      "ReplacementContent": "                                 child: Image.network(rest.imageUrl, height: 155, width: double.infinity, fit: BoxFit.cover,\r\n                                     errorBuilder: (ctx2, err, stack) => Container(height: 155, color: Colors.orange[50], child: const Icon(Icons.restaurant, color: Colors.orange, size: 50))),",
+      "StartLine": 854,
+      "TargetContent": "                                 child: Image.network(rest.imageUrl, height: 155, width: double.infinity, fit: BoxFit.cover,\r\n                                     errorBuilder: (_, e, __) => Container(height: 155, color: Colors.orange[50], child: const Icon(Icons.restaurant, color: Colors.orange, size: 50))),"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 1079,
+      "ReplacementContent": "                              child: Image.network(prod.imageUrl, width: 88, height: 88, fit: BoxFit.cover,\r\n                                  errorBuilder: (ctx2, err, stack) => Container(width: 88, height: 88, color: Colors.grey[100])),",
+      "StartLine": 1077,
+      "TargetContent": "                              child: Image.network(prod.imageUrl, width: 88, height: 88, fit: BoxFit.cover,\r\n                                  errorBuilder: (_, e, __) => Container(width: 88, height: 88, color: Colors.grey[100])),"
+    },
+    {
+      "AllowMultiple": false,
+      "EndLine": 2319,
+      "ReplacementContent": "            separatorBuilder: (ctx2, i2) => const Divider(height: 1),",
+      "StartLine": 2318,
+      "TargetContent": "            separatorBuilder: (_, __) => const Divider(height: 1),"
+    }
+  ],
+  "TargetFile": "C:\\Users\\ALayham\\Desktop\\jeebli_app\\lib\\main.dart",
+  "toolAction": "Fixing final lint warnings",
+  "toolSummary": "Final main.dart lint fixes"
+}
