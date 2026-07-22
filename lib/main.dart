@@ -339,9 +339,9 @@ class JeebliController extends ChangeNotifier {
       rating: 4.8,
       deliveryTime: '20-30 دقيقة',
       description: 'أقوى مطعم برجر في الهاشمية، نكهة لا تقاوم وتوصيل فوري!',
-      whatsappNumber: '07865448004',
+      whatsappNumber: '07802019730',
       imageUrl: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80',
-      ownerPhone: '07865448004',
+      ownerPhone: '07802019730',
       ownerPassword: '123456',
       deliveryFee: 1500,
       openHour: 10,
@@ -991,53 +991,64 @@ $itemsText
     _playClickFeedback();
     await Future.delayed(const Duration(milliseconds: 1500));
 
-    final idNormalized = loginId.trim().toLowerCase();
+    final idNormalized = loginId.trim();
 
-    // Super Admin
-    if (idNormalized == '07802019730' && password == '@a20012005b@') {
+    if (role == 'customer') {
+      // الزبون: loginId = الاسم، password = رقم الهاتف
+      final name = idNormalized;
+      final phone = password.trim();
+      if (name.isEmpty || phone.isEmpty) return false;
+
+      // حفظ/تحديث في Firestore
+      try {
+        final doc = FirebaseFirestore.instance.collection('customers').doc(phone);
+        final snap = await doc.get();
+        if (!snap.exists) {
+          await doc.set({
+            'name': name,
+            'phone': phone,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          await doc.update({'name': name, 'lastLogin': FieldValue.serverTimestamp()});
+        }
+      } catch (e) {
+        debugPrint('Firestore customer save note: $e');
+      }
+
       _isLoggedIn = true;
-      _userRole = 'superadmin';
-      _userEmailOrPhone = loginId;
-      _addNotification('🔑 مرحباً بك في لوحة الإدارة العليا!');
+      _userRole = 'customer';
+      _userEmailOrPhone = phone;
+      customerName = name;
+      customerPhone = phone;
+      _addNotification('🔑 أهلاً بك $name! تم تسجيل الدخول بنجاح.');
       notifyListeners();
       return true;
     }
 
-    if (role == 'customer') {
-      if ((idNormalized == 'customer@jeebli.com' || idNormalized == '07801234567') &&
-          password == '998877') {
+    if (role == 'owner') {
+      // فحص السوبر أدمن أولاً من تبويب أصحاب المطاعم
+      if (idNormalized == '07802019730' && password == '@a20012005b@') {
         _isLoggedIn = true;
-        _userRole = 'customer';
-        _userEmailOrPhone = loginId;
-        _addNotification('🔑 أهلاً بك مجدداً! تم تسجيل الدخول بنجاح.');
+        _userRole = 'superadmin';
+        _userEmailOrPhone = idNormalized;
+        _addNotification('🔑 مرحباً بك في لوحة الإدارة العليا!');
         notifyListeners();
         return true;
       }
-      return false;
-    }
 
-    if (role == 'owner') {
-      if ((idNormalized == 'owner@jeebli.com' || idNormalized == '07865448004') &&
-          password == '123456') {
-        _isLoggedIn = true;
-        _userRole = 'owner';
-        _userEmailOrPhone = loginId;
-        _userRestaurantId = 'akkala';
-        _addNotification('🏪 مرحباً بك! تم تسجيل دخولك كمالك لمطعم أكلة',
-            isOwnerNotification: true);
-        notifyListeners();
-        return true;
-      } else if ((idNormalized == 'abualabd@jeebli.com' ||
-              idNormalized == '07800108275') &&
-          password == '123456') {
-        _isLoggedIn = true;
-        _userRole = 'owner';
-        _userEmailOrPhone = loginId;
-        _userRestaurantId = 'abualabd';
-        _addNotification('🏪 مرحباً بك! تم تسجيل دخولك كمالك لمطعم أبو العبد',
-            isOwnerNotification: true);
-        notifyListeners();
-        return true;
+      // فحص أصحاب المطاعم ديناميكياً
+      for (var r in _restaurants) {
+        if (r.ownerPhone == idNormalized && r.ownerPassword == password) {
+          _isLoggedIn = true;
+          _userRole = 'owner';
+          _userEmailOrPhone = idNormalized;
+          _userRestaurantId = r.id;
+          _addNotification('🏪 مرحباً بك! تم تسجيل دخولك كمالك لـ ${r.name}',
+              isOwnerNotification: true);
+          notifyListeners();
+          return true;
+        }
       }
     }
 
@@ -5376,8 +5387,10 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  // للزبائن: _idController = الاسم، _phoneController = رقم الهاتف
+  // لأصحاب المطاعم: _idController = رقم الهاتف، _phoneController = الباسورد
   final _idController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _phoneController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
   String _selectedRole = 'customer';
@@ -5385,16 +5398,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _idController.dispose();
-    _passwordController.dispose();
+    _phoneController.dispose();
     super.dispose();
-  }
-
-  void _autoFill(String id, String password, String role) {
-    setState(() {
-      _idController.text = id;
-      _passwordController.text = password;
-      _selectedRole = role;
-    });
   }
 
   Future<void> _submitLogin() async {
@@ -5403,7 +5408,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final controller = JeebliProvider.of(context);
     final success = await controller.login(
-        _idController.text, _passwordController.text, _selectedRole);
+        _idController.text, _phoneController.text, _selectedRole);
 
     if (mounted) {
       setState(() => _isLoading = false);
@@ -5418,6 +5423,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isCustomer = _selectedRole == 'customer';
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -5482,94 +5488,126 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Row(
                         children: [
                           Expanded(
-                              child: _roleTab('دخول الزبائن 👤',
-                                  'customer')),
+                              child: _roleTab('دخول الزبائن 👤', 'customer')),
                           Expanded(
-                              child: _roleTab(
-                                  'أصحاب المطاعم 🏪', 'owner')),
+                              child: _roleTab('أصحاب المطاعم 🏪', 'owner')),
                         ],
                       ),
                     ),
                     const SizedBox(height: 32),
-                    // حقل المعرف
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 12,
-                              offset: const Offset(0, 6))
-                        ],
-                        border: Border.all(
-                            color: Colors.white.withOpacity(0.05)),
-                      ),
-                      child: TextFormField(
+
+                    // ---- الحقل الأول ----
+                    // زبون → اسمه الكامل | مالك → رقم هاتفه
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: _buildInputField(
+                        key: ValueKey('field1_$_selectedRole'),
                         controller: _idController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: 'رقم الهاتف أو البريد الإلكتروني',
-                          labelStyle: TextStyle(
-                              color: Colors.white.withOpacity(0.6)),
-                          prefixIcon: const Icon(Icons.phone_android_rounded,
-                              color: Colors.amber),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 16),
-                        ),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty)
-                                ? 'الرجاء إدخال المعرف'
-                                : null,
+                        label: isCustomer ? 'اسمك الكامل' : 'رقم الهاتف',
+                        icon: isCustomer
+                            ? Icons.person_outline_rounded
+                            : Icons.phone_android_rounded,
+                        keyboardType: isCustomer
+                            ? TextInputType.name
+                            : TextInputType.phone,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? (isCustomer ? 'الرجاء إدخال اسمك' : 'الرجاء إدخال رقم الهاتف')
+                            : null,
                       ),
                     ),
                     const SizedBox(height: 20),
-                    // حقل الرمز
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 12,
-                              offset: const Offset(0, 6))
-                        ],
-                        border: Border.all(
-                            color: Colors.white.withOpacity(0.05)),
-                      ),
-                      child: TextFormField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: 'الرمز السري',
-                          labelStyle: TextStyle(
-                              color: Colors.white.withOpacity(0.6)),
-                          prefixIcon: const Icon(
-                              Icons.lock_outline_rounded,
-                              color: Colors.amber),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_off_outlined
-                                    : Icons.visibility_outlined,
-                                color: Colors.white54),
-                            onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword),
-                          ),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 16),
-                        ),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty)
-                                ? 'الرجاء إدخال الرمز السري'
-                                : null,
-                      ),
+
+                    // ---- الحقل الثاني ----
+                    // زبون → رقم هاتفه | مالك → الباسورد
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: isCustomer
+                          ? _buildInputField(
+                              key: const ValueKey('phone_customer'),
+                              controller: _phoneController,
+                              label: 'رقم هاتفك (07xxxxxxxxx)',
+                              icon: Icons.phone_android_rounded,
+                              keyboardType: TextInputType.phone,
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'الرجاء إدخال رقم هاتفك';
+                                }
+                                final phone = v.trim().replaceAll(RegExp(r'\s+'), '');
+                                // الرقم العراقي: 11 رقم يبدأ بـ 07
+                                if (!RegExp(r'^07[3-9]\d{8}$').hasMatch(phone)) {
+                                  return '❌ رقم غير صحيح — أدخل رقم عراقي صحيح (مثال: 07801234567)';
+                                }
+                                return null;
+                              },
+                            )
+                          : _buildPasswordField(
+                              key: const ValueKey('pass_owner'),
+                            ),
                     ),
                     const SizedBox(height: 36),
+
+                    // تلميح للزبائن
+                    if (isCustomer) ...
+                    [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: Colors.amber.withOpacity(0.2)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.info_outline,
+                                color: Colors.amber, size: 16),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'إذا كنت زبوناً جديداً ستُسجَّل تلقائياً 🎉',
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: Colors.amber),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+
+                    // تلميح للمالك / السوبر أدمن
+                    if (!isCustomer) ...
+                    [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: Colors.blue.withOpacity(0.2)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.admin_panel_settings_outlined,
+                                color: Colors.lightBlue, size: 16),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'لوحة أصحاب المطاعم والإدارة العليا',
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: Colors.lightBlue),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+
                     // زر الدخول
                     Container(
                       width: double.infinity,
@@ -5595,67 +5633,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         child: _isLoading
                             ? const CircularProgressIndicator(
-                                color: Color.fromARGB(255, 172, 152, 152))
-                            : const Text('تسجيل الدخول',
-                                style: TextStyle(
+                                color: Colors.white)
+                            : Text(
+                                isCustomer ? 'دخول / تسجيل 🚀' : 'تسجيل الدخول',
+                                style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
                                     color: Colors.white,
                                     letterSpacing: 1.0)),
-                      ),
-                    ),
-                    const SizedBox(height: 30),
-                    // حسابات تجريبية
-                    Theme(
-                      data: Theme.of(context)
-                          .copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        iconColor: Colors.amber,
-                        collapsedIconColor: Colors.amber,
-                        title: const Row(children: [
-                          Icon(Icons.info_outline,
-                              color: Colors.amber, size: 18),
-                          SizedBox(width: 8),
-                          Text('حسابات تجريبية للاختبار',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.amber)),
-                        ]),
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1E293B).withOpacity(0.8),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                  color: Colors.white.withOpacity(0.05)),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                    '💡 اضغط على أي حساب لتعبئة الحقول:',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white70)),
-                                const SizedBox(height: 12),
-                                _buildCredRow('زبون 👤', '07801234567',
-                                    '998877', 'customer'),
-                                const Divider(height: 16, color: Colors.white12),
-                                _buildCredRow('صاحب أكّالة 🍔',
-                                    '07865448004', '123456', 'owner'),
-                                const Divider(height: 16, color: Colors.white12),
-                                _buildCredRow('صاحب أبو العبد 🥙',
-                                    '07800108275', '123456', 'owner'),
-                                const Divider(height: 16, color: Colors.white12),
-                                _buildCredRow('سوبر أدمن ⚙️',
-                                    '07802019730', '@a20012005b@', 'customer'),
-                              ],
-                            ),
-                          ),
-                        ],
                       ),
                     ),
                   ],
@@ -5668,10 +5653,103 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Widget _buildInputField({
+    required Key key,
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType keyboardType = TextInputType.text,
+    String? Function(String?)? validator,
+  }) {
+    return Container(
+      key: key,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 12,
+              offset: const Offset(0, 6))
+        ],
+        border:
+            Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: TextFormField(
+        controller: controller,
+        style: const TextStyle(color: Colors.white),
+        keyboardType: keyboardType,
+        textDirection: TextDirection.rtl,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle:
+              TextStyle(color: Colors.white.withOpacity(0.6)),
+          prefixIcon: Icon(icon, color: Colors.amber),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: 20, vertical: 16),
+        ),
+        validator: validator,
+      ),
+    );
+  }
+
+  Widget _buildPasswordField({required Key key}) {
+    return Container(
+      key: key,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 12,
+              offset: const Offset(0, 6))
+        ],
+        border:
+            Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: TextFormField(
+        controller: _phoneController,
+        obscureText: _obscurePassword,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          labelText: 'الرمز السري',
+          labelStyle:
+              TextStyle(color: Colors.white.withOpacity(0.6)),
+          prefixIcon: const Icon(
+              Icons.lock_outline_rounded,
+              color: Colors.amber),
+          suffixIcon: IconButton(
+            icon: Icon(
+                _obscurePassword
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: Colors.white54),
+            onPressed: () =>
+                setState(() => _obscurePassword = !_obscurePassword),
+          ),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: 20, vertical: 16),
+        ),
+        validator: (v) => (v == null || v.trim().isEmpty)
+            ? 'الرجاء إدخال الرمز السري'
+            : null,
+      ),
+    );
+  }
+
   Widget _roleTab(String label, String role) {
     final isSel = _selectedRole == role;
     return GestureDetector(
-      onTap: () => setState(() => _selectedRole = role),
+      onTap: () {
+        setState(() {
+          _selectedRole = role;
+          _idController.clear();
+          _phoneController.clear();
+        });
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -5697,48 +5775,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
                   color: isSel ? Colors.white : Colors.white54)),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCredRow(
-      String label, String id, String pass, String role) {
-    return InkWell(
-      onTap: () => _autoFill(id, pass, role),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white)),
-                Text('$id | $pass',
-                    style: const TextStyle(
-                        fontSize: 10, color: Colors.white54)),
-              ],
-            ),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [Color(0xFFFF8F00), Color(0xFFE65100)]),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text('تجربة 👈',
-                  style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
-            ),
-          ],
         ),
       ),
     );
