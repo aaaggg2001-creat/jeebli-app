@@ -6,9 +6,24 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'super_admin_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: 'AIzaSyJeebliAppKey1234567890abcdef',
+        appId: '1:100000000000:android:jeebliapp12345',
+        messagingSenderId: '100000000000',
+        projectId: 'jeebli-app',
+      ),
+    );
+  } catch (e) {
+    debugPrint('Firebase init note: $e');
+  }
   runApp(const MyApp());
 }
 
@@ -70,6 +85,46 @@ class Restaurant {
     }
     return '${fmt(openHour)} - ${fmt(closeHour)}';
   }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'location': location,
+      'cuisine': cuisine,
+      'rating': rating,
+      'deliveryTime': deliveryTime,
+      'imageUrl': imageUrl,
+      'description': description,
+      'whatsappNumber': whatsappNumber,
+      'isActive': isActive,
+      'deliveryFee': deliveryFee,
+      'ownerPhone': ownerPhone,
+      'ownerPassword': ownerPassword,
+      'openHour': openHour,
+      'closeHour': closeHour,
+    };
+  }
+
+  factory Restaurant.fromMap(Map<String, dynamic> map, String docId) {
+    return Restaurant(
+      id: map['id'] ?? docId,
+      name: map['name'] ?? '',
+      location: map['location'] ?? '',
+      cuisine: map['cuisine'] ?? '',
+      rating: (map['rating'] ?? 4.5).toDouble(),
+      deliveryTime: map['deliveryTime'] ?? '20-30 دقيقة',
+      imageUrl: map['imageUrl'] ?? '',
+      description: map['description'] ?? '',
+      whatsappNumber: map['whatsappNumber'] ?? '',
+      isActive: map['isActive'] ?? true,
+      deliveryFee: (map['deliveryFee'] ?? 1500).toDouble(),
+      ownerPhone: map['ownerPhone'],
+      ownerPassword: map['ownerPassword'],
+      openHour: map['openHour'] ?? 10,
+      closeHour: map['closeHour'] ?? 23,
+    );
+  }
 }
 
 class Product {
@@ -94,6 +149,34 @@ class Product {
     required this.categoryId,
     this.isAvailable = true,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'restaurantId': restaurantId,
+      'name': name,
+      'description': description,
+      'price': price,
+      'discountPrice': discountPrice,
+      'imageUrl': imageUrl,
+      'categoryId': categoryId,
+      'isAvailable': isAvailable,
+    };
+  }
+
+  factory Product.fromMap(Map<String, dynamic> map, String docId) {
+    return Product(
+      id: map['id'] ?? docId,
+      restaurantId: map['restaurantId'] ?? '',
+      name: map['name'] ?? '',
+      description: map['description'] ?? '',
+      price: (map['price'] ?? 0).toDouble(),
+      discountPrice: map['discountPrice'] != null ? (map['discountPrice'] as num).toDouble() : null,
+      imageUrl: map['imageUrl'] ?? '',
+      categoryId: map['categoryId'] ?? 'all',
+      isAvailable: map['isAvailable'] ?? true,
+    );
+  }
 
   Product copyWith({
     String? name,
@@ -201,6 +284,50 @@ enum OrderStatus { idle, confirmed, preparing, onWay, arrived, rated }
 enum PaymentMethod { cod, mastercard }
 
 class JeebliController extends ChangeNotifier {
+
+  JeebliController() {
+    _initFirebaseSync();
+  }
+
+  void _initFirebaseSync() {
+    try {
+      final firestore = FirebaseFirestore.instance;
+
+      // Listen to real-time restaurant changes from Firebase
+      firestore.collection('restaurants').snapshots().listen((snapshot) {
+        if (snapshot.docs.isNotEmpty) {
+          _restaurants.clear();
+          for (var doc in snapshot.docs) {
+            _restaurants.add(Restaurant.fromMap(doc.data(), doc.id));
+          }
+          notifyListeners();
+        } else {
+          // Seed initial default restaurants to Firebase
+          for (var r in _restaurants) {
+            firestore.collection('restaurants').doc(r.id).set(r.toMap());
+          }
+        }
+      }, onError: (e) => debugPrint('Firestore restaurants sync note: $e'));
+
+      // Listen to real-time product changes from Firebase
+      firestore.collection('products').snapshots().listen((snapshot) {
+        if (snapshot.docs.isNotEmpty) {
+          _products.clear();
+          for (var doc in snapshot.docs) {
+            _products.add(Product.fromMap(doc.data(), doc.id));
+          }
+          notifyListeners();
+        } else {
+          // Seed initial default products to Firebase
+          for (var p in _products) {
+            firestore.collection('products').doc(p.id).set(p.toMap());
+          }
+        }
+      }, onError: (e) => debugPrint('Firestore products sync note: $e'));
+    } catch (e) {
+      debugPrint('Firestore sync init note: $e');
+    }
+  }
 
   // --- قوائم البيانات ---
   final List<Restaurant> _restaurants = [
@@ -438,12 +565,24 @@ class JeebliController extends ChangeNotifier {
   // --- Restaurant CRUD ---
   void addRestaurant(Restaurant restaurant) {
     _restaurants.add(restaurant);
+    try {
+      FirebaseFirestore.instance
+          .collection('restaurants')
+          .doc(restaurant.id)
+          .set(restaurant.toMap());
+    } catch (_) {}
     notifyListeners();
   }
 
   void deleteRestaurant(String restaurantId) {
     _restaurants.removeWhere((r) => r.id == restaurantId);
     _products.removeWhere((p) => p.restaurantId == restaurantId);
+    try {
+      FirebaseFirestore.instance
+          .collection('restaurants')
+          .doc(restaurantId)
+          .delete();
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -451,6 +590,12 @@ class JeebliController extends ChangeNotifier {
     final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
     if (idx >= 0) {
       _restaurants[idx].isActive = !_restaurants[idx].isActive;
+      try {
+        FirebaseFirestore.instance
+            .collection('restaurants')
+            .doc(restaurantId)
+            .update({'isActive': _restaurants[idx].isActive});
+      } catch (_) {}
       notifyListeners();
     }
   }
@@ -459,6 +604,12 @@ class JeebliController extends ChangeNotifier {
     final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
     if (idx >= 0) {
       _restaurants[idx].deliveryFee = fee;
+      try {
+        FirebaseFirestore.instance
+            .collection('restaurants')
+            .doc(restaurantId)
+            .update({'deliveryFee': fee});
+      } catch (_) {}
       notifyListeners();
     }
   }
@@ -466,11 +617,23 @@ class JeebliController extends ChangeNotifier {
   // --- Product CRUD ---
   void addProduct(Product product) {
     _products.add(product);
+    try {
+      FirebaseFirestore.instance
+          .collection('products')
+          .doc(product.id)
+          .set(product.toMap());
+    } catch (_) {}
     notifyListeners();
   }
 
   void deleteProduct(String productId) {
     _products.removeWhere((p) => p.id == productId);
+    try {
+      FirebaseFirestore.instance
+          .collection('products')
+          .doc(productId)
+          .delete();
+    } catch (_) {}
     notifyListeners();
   }
 
