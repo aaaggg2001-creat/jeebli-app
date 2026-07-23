@@ -10,6 +10,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'super_admin_screen.dart';
 
 void main() async {
@@ -476,6 +477,52 @@ class JeebliController extends ChangeNotifier {
   String selectedNeighborhood = '';
   String streetDetails = '';
   String orderNotes = '';
+  bool isLocating = false;
+  double? customerLat;
+  double? customerLng;
+
+  Future<bool> detectLocation() async {
+    isLocating = true;
+    notifyListeners();
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        isLocating = false;
+        notifyListeners();
+        return false;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          isLocating = false;
+          notifyListeners();
+          return false;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        isLocating = false;
+        notifyListeners();
+        return false;
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+      customerLat = position.latitude;
+      customerLng = position.longitude;
+      isLocating = false;
+      playFeedbackSound();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Location detection note: $e');
+      isLocating = false;
+      notifyListeners();
+      return false;
+    }
+  }
   PaymentMethod paymentMethod = PaymentMethod.cod;
   String cardNumber = '';
   String cardExpiry = '';
@@ -1021,6 +1068,10 @@ class JeebliController extends ChangeNotifier {
         ? '\n📝 *ملاحظات الطلب:* ${orderNotes.trim()}'
         : '';
 
+    final mapLinkSection = (customerLat != null && customerLng != null)
+        ? '\n📍 *موقع الزبون المباشر على الخريطة:* https://maps.google.com/?q=$customerLat,$customerLng'
+        : '';
+
     final message = '''
 🧾 *طلب جديد - جيب لي ديلفري* 🛵
 --------------------------------
@@ -1029,7 +1080,7 @@ class JeebliController extends ChangeNotifier {
 👤 *اسم الزبون:* $customerName
 📞 *رقم الهاتف:* $customerPhone
 📍 *المنطقة:* $selectedNeighborhood
-🏠 *أقرب نقطة دالة:* $streetDetails$notesSection
+🏠 *أقرب نقطة دالة:* $streetDetails$notesSection$mapLinkSection
 --------------------------------
 🍔 *الوجبات المطلوبة:*
 $itemsText
@@ -3069,6 +3120,75 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: controller.isLocating
+                      ? null
+                      : () async {
+                          final success = await controller.detectLocation();
+                          if (!context.mounted) return;
+                          if (success) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ تم تحديد إحداثيات موقعك الجغرافي بنجاح! سيتم إرسال رابط الخريطة للمندوب'),
+                                backgroundColor: Colors.green,
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('⚠️ تعذر تحديد الموقع تلقائياً. يمكنك كتابة موقعك يدويًا بكل سهولة.'),
+                                backgroundColor: Colors.orange,
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        },
+                  icon: controller.isLocating
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber))
+                      : Icon(
+                          controller.customerLat != null
+                              ? Icons.my_location_rounded
+                              : Icons.location_searching_rounded,
+                          color: controller.customerLat != null
+                              ? Colors.greenAccent
+                              : Colors.amber,
+                          size: 20,
+                        ),
+                  label: Text(
+                    controller.isLocating
+                        ? 'جاري تحديد موقعك الـ GPS...'
+                        : (controller.customerLat != null
+                            ? 'موقعك الـ GPS محدد بنجاح ✅ (إعادة التحديد)'
+                            : '📍 حدد موقعي الجغرافي الـ GPS تلقائياً'),
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: controller.customerLat != null
+                          ? Colors.greenAccent
+                          : Colors.amber,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E293B),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      side: BorderSide(
+                        color: controller.customerLat != null
+                            ? Colors.greenAccent.withOpacity(0.5)
+                            : Colors.amber.withOpacity(0.4),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               _sectionTitle('🏠 بيانات التوصيل'),
               const SizedBox(height: 10),
               Container(
