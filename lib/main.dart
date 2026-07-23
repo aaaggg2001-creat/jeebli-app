@@ -74,6 +74,9 @@ class Restaurant {
 
   bool get isOpenNow {
     if (isClosedManually) return false;
+    if (openHour == closeHour || (openHour == 0 && closeHour == 24)) {
+      return true; // يعمل 24 ساعة ليل ونهار
+    }
     final now = DateTime.now();
     final hour = now.hour;
     if (openHour < closeHour) {
@@ -85,6 +88,9 @@ class Restaurant {
   }
 
   String get workingHoursLabel {
+    if (openHour == closeHour || (openHour == 0 && closeHour == 24)) {
+      return '24 ساعة (على مدار اليوم 🌙☀️)';
+    }
     String fmt(int h) {
       final period = h >= 12 ? 'م' : 'ص';
       final h12 = h % 12 == 0 ? 12 : h % 12;
@@ -685,6 +691,8 @@ class JeebliController extends ChangeNotifier {
     String? deliveryTime,
     String? description,
     String? imageUrl,
+    int? openHour,
+    int? closeHour,
   }) {
     final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
     if (idx >= 0) {
@@ -705,8 +713,8 @@ class JeebliController extends ChangeNotifier {
         deliveryFee: deliveryFee ?? r.deliveryFee,
         ownerPhone: r.ownerPhone,
         ownerPassword: r.ownerPassword,
-        openHour: r.openHour,
-        closeHour: r.closeHour,
+        openHour: openHour ?? r.openHour,
+        closeHour: closeHour ?? r.closeHour,
       );
       try {
         FirebaseFirestore.instance
@@ -1950,15 +1958,11 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                               ClipRRect(
                                 borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(24)),
-                                child: Image.network(rest.imageUrl,
+                                child: CustomAppImage(
+                                    imageUrl: rest.imageUrl,
                                     height: 160,
                                     width: double.infinity,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (ctx, err, stack) => Container(
-                                        height: 160,
-                                        color: const Color(0xFF0F172A),
-                                        child: const Icon(Icons.restaurant,
-                                            color: Colors.white24, size: 50))),
+                                    fit: BoxFit.cover),
                               ),
                               // overlay مغلق فوق الصورة
                               if (!rest.isOpenNow)
@@ -4943,64 +4947,185 @@ void _showOwnerEditRestaurantDialog(
   final descCtrl = TextEditingController(text: rest.description);
   final imgCtrl = TextEditingController(text: rest.imageUrl);
 
+  int selectedOpenHour = rest.openHour;
+  int selectedCloseHour = rest.closeHour;
+  bool is24Hours = (rest.openHour == 0 && rest.closeHour == 24) || (rest.openHour == rest.closeHour);
+
   showDialog(
     context: context,
-    builder: (ctx) => Directionality(
-      textDirection: TextDirection.rtl,
-      child: AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('تعديل بيانات المطعم ✏️',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _darkInput('اسم المطعم', nameCtrl),
-              const SizedBox(height: 8),
-              _darkInput('رقم الواتساب لاستقبال الطلبات', waCtrl, type: TextInputType.phone),
-              const SizedBox(height: 8),
-              _darkInput('أجور التوصيل (د.ع)', feeCtrl, type: TextInputType.number),
-              const SizedBox(height: 8),
-              _darkInput('وقت التوصيل المتوقع (مثال: 20-30 دقيقة)', timeCtrl),
-              const SizedBox(height: 8),
-              _darkInput('وصف المطعم', descCtrl),
-              const SizedBox(height: 8),
-              _darkInput('رابط صورة المطعم', imgCtrl),
+    builder: (ctx) => StatefulBuilder(
+      builder: (context, setState) {
+        return Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF1E293B),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('تعديل بيانات المطعم ✏️',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _darkInput('اسم المطعم', nameCtrl),
+                  const SizedBox(height: 8),
+                  _darkInput('رقم الواتساب لاستقبال الطلبات', waCtrl, type: TextInputType.phone),
+                  const SizedBox(height: 8),
+                  _darkInput('أجور التوصيل (د.ع)', feeCtrl, type: TextInputType.number),
+                  const SizedBox(height: 8),
+                  _darkInput('وقت التوصيل المتوقع (مثال: 20-30 دقيقة)', timeCtrl),
+                  const SizedBox(height: 8),
+                  _darkInput('وصف المطعم', descCtrl),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(child: _darkInput('صورة المطعم (رابط أو ملف)', imgCtrl)),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        onPressed: () async {
+                          final newUrl = await _showImagePickerChoice(context);
+                          if (newUrl != null && newUrl.isNotEmpty) {
+                            setState(() => imgCtrl.text = newUrl);
+                          }
+                        },
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.amber),
+                          ),
+                          child: const Icon(Icons.add_a_photo_rounded, color: Colors.amber, size: 20),
+                        ),
+                        tooltip: 'اختر صورة من الكاميرا أو المعرض',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('ساعات وقواعد العمل 🕒',
+                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: is24Hours,
+                              activeColor: Colors.amber,
+                              onChanged: (val) {
+                                setState(() {
+                                  is24Hours = val ?? false;
+                                  if (is24Hours) {
+                                    selectedOpenHour = 0;
+                                    selectedCloseHour = 24;
+                                  }
+                                });
+                              },
+                            ),
+                            const Expanded(
+                              child: Text('يعمل 24 ساعة (ليل ونهار دون إغلاق 🌙☀️)',
+                                  style: TextStyle(color: Colors.amber, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                        if (!is24Hours) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: DropdownButtonFormField<int>(
+                                  value: selectedOpenHour,
+                                  dropdownColor: const Color(0xFF334155),
+                                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                                  decoration: InputDecoration(
+                                    labelText: 'يفتح من الساعة',
+                                    labelStyle: const TextStyle(color: Colors.white54, fontSize: 10),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    filled: true,
+                                    fillColor: Colors.white.withOpacity(0.05),
+                                  ),
+                                  items: List.generate(24, (i) {
+                                    final period = i >= 12 ? 'م' : 'ص';
+                                    final h12 = i % 12 == 0 ? 12 : i % 12;
+                                    return DropdownMenuItem(value: i, child: Text('$h12:00 $period'));
+                                  }),
+                                  onChanged: (val) => setState(() => selectedOpenHour = val ?? 10),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: DropdownButtonFormField<int>(
+                                  value: selectedCloseHour > 24 ? 24 : selectedCloseHour,
+                                  dropdownColor: const Color(0xFF334155),
+                                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                                  decoration: InputDecoration(
+                                    labelText: 'يغلق الساعة',
+                                    labelStyle: const TextStyle(color: Colors.white54, fontSize: 10),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    filled: true,
+                                    fillColor: Colors.white.withOpacity(0.05),
+                                  ),
+                                  items: List.generate(25, (i) {
+                                    if (i == 24) return const DropdownMenuItem(value: 24, child: Text('12:00 ص (منتصف الليل)'));
+                                    final period = i >= 12 ? 'م' : 'ص';
+                                    final h12 = i % 12 == 0 ? 12 : i % 12;
+                                    return DropdownMenuItem(value: i, child: Text('$h12:00 $period'));
+                                  }),
+                                  onChanged: (val) => setState(() => selectedCloseHour = val ?? 23),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+              ElevatedButton(
+                onPressed: () {
+                  final fee = double.tryParse(feeCtrl.text) ?? rest.deliveryFee;
+                  ctrl.updateRestaurantDetails(
+                    rest.id,
+                    name: nameCtrl.text.trim(),
+                    whatsappNumber: waCtrl.text.trim(),
+                    deliveryFee: fee,
+                    deliveryTime: timeCtrl.text.trim(),
+                    description: descCtrl.text.trim(),
+                    imageUrl: imgCtrl.text.trim(),
+                    openHour: is24Hours ? 0 : selectedOpenHour,
+                    closeHour: is24Hours ? 24 : selectedCloseHour,
+                  );
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('تم تحديث بيانات وساعات عمل المطعم بنجاح ✅'),
+                      backgroundColor: Colors.green,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF8F00), foregroundColor: Colors.white),
+                child: const Text('حفظ التعديلات'),
+              ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
-          ElevatedButton(
-            onPressed: () {
-              final fee = double.tryParse(feeCtrl.text) ?? rest.deliveryFee;
-              ctrl.updateRestaurantDetails(
-                rest.id,
-                name: nameCtrl.text.trim(),
-                whatsappNumber: waCtrl.text.trim(),
-                deliveryFee: fee,
-                deliveryTime: timeCtrl.text.trim(),
-                description: descCtrl.text.trim(),
-                imageUrl: imgCtrl.text.trim(),
-              );
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('تم تحديث بيانات المطعم بنجاح ✅'),
-                  backgroundColor: Colors.green,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF8F00), foregroundColor: Colors.white),
-            child: const Text('حفظ التعديلات'),
-          ),
-        ],
-      ),
+        );
+      },
     ),
   );
 }
@@ -5054,7 +5179,30 @@ void _showOwnerProductDialog(
                   const SizedBox(height: 8),
                   _darkInput('الوصف', descController),
                   const SizedBox(height: 8),
-                  _darkInput('رابط الصورة', imageController),
+                  Row(
+                    children: [
+                      Expanded(child: _darkInput('صورة الوجبة (رابط أو ملف)', imageController)),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        onPressed: () async {
+                          final newUrl = await _showImagePickerChoice(context);
+                          if (newUrl != null && newUrl.isNotEmpty) {
+                            setState(() => imageController.text = newUrl);
+                          }
+                        },
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.amber),
+                          ),
+                          child: const Icon(Icons.add_a_photo_rounded, color: Colors.amber, size: 20),
+                        ),
+                        tooltip: 'اختر صورة من الكاميرا أو المعرض',
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   _darkInput('سعر التخفيض (اختياري)', discountController,
                       type: TextInputType.number),
@@ -6514,4 +6662,127 @@ void _showUrlInputDialog(
       ),
     ),
   );
+}
+
+Future<String?> _showImagePickerChoice(BuildContext context) async {
+  final picker = ImagePicker();
+  String? resultUrl;
+
+  await showModalBottomSheet(
+    context: context,
+    backgroundColor: const Color(0xFF1E293B),
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (ctx) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('اختر مصدر الصورة 📸',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded, color: Colors.amber, size: 28),
+              title: const Text('اختيار من المعرض (الاستوديو) 🖼️',
+                  style: TextStyle(color: Colors.white, fontSize: 14)),
+              onTap: () async {
+                final file = await picker.pickImage(
+                    source: ImageSource.gallery, maxWidth: 800, maxHeight: 800);
+                if (file != null) {
+                  final bytes = await file.readAsBytes();
+                  resultUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+            ),
+            const Divider(color: Colors.white12),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded, color: Colors.greenAccent, size: 28),
+              title: const Text('التقاط مباشرة بواسطة الكاميرا 📸',
+                  style: TextStyle(color: Colors.white, fontSize: 14)),
+              onTap: () async {
+                final file = await picker.pickImage(
+                    source: ImageSource.camera, maxWidth: 800, maxHeight: 800);
+                if (file != null) {
+                  final bytes = await file.readAsBytes();
+                  resultUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+            ),
+            const Divider(color: Colors.white12),
+            ListTile(
+              leading: const Icon(Icons.link_rounded, color: Colors.lightBlueAccent, size: 28),
+              title: const Text('إدخال رابط URL من الإنترنت 🌐',
+                  style: TextStyle(color: Colors.white, fontSize: 14)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showUrlInputDialog(context, (url) {
+                  resultUrl = url;
+                });
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  return resultUrl;
+}
+
+class CustomAppImage extends StatelessWidget {
+  final String imageUrl;
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+
+  const CustomAppImage({
+    super.key,
+    required this.imageUrl,
+    this.width,
+    this.height,
+    this.fit = BoxFit.cover,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (imageUrl.startsWith('data:image')) {
+      try {
+        final base64Str = imageUrl.split(',').last;
+        final bytes = base64Decode(base64Str);
+        return Image.memory(
+          bytes,
+          width: width,
+          height: height,
+          fit: fit,
+          errorBuilder: (ctx, err, stack) => _errorPlaceholder(),
+        );
+      } catch (_) {
+        return _errorPlaceholder();
+      }
+    }
+
+    return Image.network(
+      imageUrl,
+      width: width,
+      height: height,
+      fit: fit,
+      errorBuilder: (ctx, err, stack) => _errorPlaceholder(),
+    );
+  }
+
+  Widget _errorPlaceholder() {
+    return Container(
+      width: width,
+      height: height,
+      color: const Color(0xFF0F172A),
+      child: const Icon(Icons.fastfood_rounded, color: Colors.white24, size: 40),
+    );
+  }
 }
