@@ -52,6 +52,8 @@ class Restaurant {
   String? ownerPassword;
   final int openHour;   // 0-23
   final int closeHour;  // 0-23
+  double? restaurantLat;  // موقع المطعم
+  double? restaurantLng;
 
   Restaurant({
     required this.id,
@@ -71,6 +73,8 @@ class Restaurant {
     this.ownerPassword,
     this.openHour = 0,
     this.closeHour = 24,
+    this.restaurantLat,
+    this.restaurantLng,
   });
 
   bool get isOpenNow {
@@ -119,6 +123,8 @@ class Restaurant {
       'ownerPassword': ownerPassword,
       'openHour': openHour,
       'closeHour': closeHour,
+      'restaurantLat': restaurantLat,
+      'restaurantLng': restaurantLng,
     };
   }
 
@@ -141,8 +147,25 @@ class Restaurant {
       ownerPassword: map['ownerPassword'],
       openHour: map['openHour'] ?? 0,
       closeHour: map['closeHour'] ?? 24,
+      restaurantLat: map['restaurantLat'] != null ? (map['restaurantLat'] as num).toDouble() : null,
+      restaurantLng: map['restaurantLng'] != null ? (map['restaurantLng'] as num).toDouble() : null,
     );
   }
+
+  /// حساب المسافة بالكيلومتر بين المطعم والزبون
+  double? distanceTo(double? lat, double? lng) {
+    if (restaurantLat == null || restaurantLng == null || lat == null || lng == null) return null;
+    const R = 6371.0;
+    final dLat = _toRad(lat - restaurantLat!);
+    final dLng = _toRad(lng - restaurantLng!);
+    final a = _sin2(dLat / 2) +
+        cos(_toRad(restaurantLat!)) * cos(_toRad(lat)) * _sin2(dLng / 2);
+    final c = 2 * asin(sqrt(a));
+    return R * c;
+  }
+
+  static double _toRad(double deg) => deg * pi / 180;
+  static double _sin2(double x) => sin(x) * sin(x);
 }
 
 class Product {
@@ -304,8 +327,10 @@ enum PaymentMethod { cod, mastercard }
 class JeebliController extends ChangeNotifier {
 
   JeebliController() {
-    _initFirebaseSync();
-    _loadSavedSession();
+    _loadLocalData().then((_) {
+      _initFirebaseSync();
+      _loadSavedSession();
+    });
   }
 
   void _loadSavedSession() async {
@@ -356,6 +381,44 @@ class JeebliController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── حفظ وتحميل البيانات محلياً ───────────────────────────────────────
+  Future<void> _saveLocalData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final restsJson = _restaurants.map((r) => jsonEncode(r.toMap())).toList();
+      await prefs.setStringList('local_restaurants', restsJson);
+      final prodsJson = _products.map((p) => jsonEncode(p.toMap())).toList();
+      await prefs.setStringList('local_products', prodsJson);
+    } catch (e) {
+      debugPrint('Local save note: $e');
+    }
+  }
+
+  Future<void> _loadLocalData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final restsJson = prefs.getStringList('local_restaurants') ?? [];
+      if (restsJson.isNotEmpty) {
+        _restaurants.clear();
+        for (var j in restsJson) {
+          final map = jsonDecode(j) as Map<String, dynamic>;
+          _restaurants.add(Restaurant.fromMap(map, map['id'] ?? ''));
+        }
+      }
+      final prodsJson = prefs.getStringList('local_products') ?? [];
+      if (prodsJson.isNotEmpty) {
+        _products.clear();
+        for (var j in prodsJson) {
+          final map = jsonDecode(j) as Map<String, dynamic>;
+          _products.add(Product.fromMap(map, map['id'] ?? ''));
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Local load note: $e');
+    }
+  }
+
   void _initFirebaseSync() {
     try {
       final firestore = FirebaseFirestore.instance;
@@ -367,13 +430,10 @@ class JeebliController extends ChangeNotifier {
           for (var doc in snapshot.docs) {
             _restaurants.add(Restaurant.fromMap(doc.data(), doc.id));
           }
+          _saveLocalData();
           notifyListeners();
-        } else {
-          // Seed initial default restaurants to Firebase
-          for (var r in _restaurants) {
-            firestore.collection('restaurants').doc(r.id).set(r.toMap());
-          }
         }
+        // إذا Firestore فارغ نبقي البيانات المحلية كما هي
       }, onError: (e) => debugPrint('Firestore restaurants sync note: $e'));
 
       // Listen to real-time product changes from Firebase
@@ -383,12 +443,8 @@ class JeebliController extends ChangeNotifier {
           for (var doc in snapshot.docs) {
             _products.add(Product.fromMap(doc.data(), doc.id));
           }
+          _saveLocalData();
           notifyListeners();
-        } else {
-          // Seed initial default products to Firebase
-          for (var p in _products) {
-            firestore.collection('products').doc(p.id).set(p.toMap());
-          }
         }
       }, onError: (e) => debugPrint('Firestore products sync note: $e'));
     } catch (e) {
@@ -679,6 +735,7 @@ class JeebliController extends ChangeNotifier {
   // --- Restaurant CRUD ---
   void addRestaurant(Restaurant restaurant) {
     _restaurants.add(restaurant);
+    _saveLocalData();
     try {
       FirebaseFirestore.instance
           .collection('restaurants')
@@ -691,6 +748,7 @@ class JeebliController extends ChangeNotifier {
   void deleteRestaurant(String restaurantId) {
     _restaurants.removeWhere((r) => r.id == restaurantId);
     _products.removeWhere((p) => p.restaurantId == restaurantId);
+    _saveLocalData();
     try {
       FirebaseFirestore.instance
           .collection('restaurants')
@@ -698,6 +756,17 @@ class JeebliController extends ChangeNotifier {
           .delete();
     } catch (_) {}
     notifyListeners();
+  }
+
+  /// تحديث موقع المطعم (lat/lng) من صاحبه
+  void updateRestaurantLocation(String restaurantId, double lat, double lng) {
+    final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
+    if (idx >= 0) {
+      _restaurants[idx].restaurantLat = lat;
+      _restaurants[idx].restaurantLng = lng;
+      _saveLocalData();
+      notifyListeners();
+    }
   }
 
   void toggleRestaurantActive(String restaurantId) {
@@ -827,6 +896,7 @@ class JeebliController extends ChangeNotifier {
   // --- Product CRUD ---
   void addProduct(Product product) {
     _products.add(product);
+    _saveLocalData();
     try {
       FirebaseFirestore.instance
           .collection('products')
@@ -838,6 +908,7 @@ class JeebliController extends ChangeNotifier {
 
   void deleteProduct(String productId) {
     _products.removeWhere((p) => p.id == productId);
+    _saveLocalData();
     try {
       FirebaseFirestore.instance
           .collection('products')
@@ -868,6 +939,7 @@ class JeebliController extends ChangeNotifier {
         isAvailable: isAvailable,
         clearDiscount: clearDiscount,
       );
+      _saveLocalData();
       notifyListeners();
     }
   }
@@ -876,6 +948,7 @@ class JeebliController extends ChangeNotifier {
     final idx = _products.indexWhere((p) => p.id == productId);
     if (idx >= 0) {
       _products[idx] = _products[idx].copyWith(isAvailable: !_products[idx].isAvailable);
+      _saveLocalData();
       playFeedbackSound();
       notifyListeners();
     }
@@ -1408,8 +1481,15 @@ class _SplashScreenState extends State<SplashScreen>
       if (mounted) _progressController.forward();
     });
 
-    // Navigate after 3.4 seconds
-    Future.delayed(const Duration(milliseconds: 3400), () {
+    // Navigate after 3.4 seconds — ثم اسأل عن الموقع إذا أول تشغيل
+    Future.delayed(const Duration(milliseconds: 3400), () async {
+      if (!mounted) return;
+      final prefs = await SharedPreferences.getInstance();
+      final locationAsked = prefs.getBool('location_asked') ?? false;
+      if (!locationAsked && mounted) {
+        await prefs.setBool('location_asked', true);
+        if (mounted) await _showLocationPrompt(context);
+      }
       if (mounted) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
@@ -1426,6 +1506,87 @@ class _SplashScreenState extends State<SplashScreen>
       }
     });
   }
+
+  /// Dialog اختيار تفعيل الموقع عند أول تشغيل
+  Future<void> _showLocationPrompt(BuildContext context) async {
+    final controller = JeebliProvider.of(context);
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Dialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFFF8F00), Color(0xFFFF6B00)],
+                    ),
+                  ),
+                  child: const Icon(Icons.location_on_rounded, color: Colors.white, size: 36),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'تفعيل خدمة الموقع',
+                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'هل تريد تفعيل الموقع لرؤية أقرب المطاعم إليك؟\nيمكنك تفعيله لاحقاً من صفحتك الشخصية.',
+                  style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.6),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white54,
+                          side: const BorderSide(color: Colors.white24),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('لاحقاً'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF8F00),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          await controller.detectLocation();
+                        },
+                        child: const Text('تفعيل', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
 
   @override
   void dispose() {
@@ -4557,19 +4718,33 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           const SizedBox(height: 16),
           _buildVendorAnalyticsCard(context, controller, controller.userRestaurantId ?? 'akkala'),
           const SizedBox(height: 18),
-          if (isAkkalaOwner)
-            _buildRestSection(
-                context, controller, 'akkala', 'مطعم أكّالة (الهاشمية)'),
-          if (isAbuAlAbdOwner)
-            _buildRestSection(context, controller, 'abualabd',
-                'مطعم أبو العبد (الحمزة الغربي)'),
-          if (!isAkkalaOwner && !isAbuAlAbdOwner) ...[
-            _buildRestSection(
-                context, controller, 'akkala', 'مطعم أكّالة (الهاشمية)'),
-            const SizedBox(height: 16),
-            _buildRestSection(context, controller, 'abualabd',
-                'مطعم أبو العبد (الحمزة الغربي)'),
-          ],
+          // ─── عرض مطعم صاحبه فقط حسب الـ ID ───
+          Builder(builder: (ctx) {
+            final myId = controller.userRestaurantId ?? '';
+            final myRest = controller.allRestaurants
+                .where((r) => r.id == myId)
+                .toList();
+            if (myRest.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.store_mall_directory_outlined,
+                          color: Colors.white30, size: 48),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'لم يتم العثور على مطعمك.\nتواصل مع الإدارة.',
+                        style: TextStyle(color: Colors.white54, fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            return _buildRestSection(ctx, controller, myId, myRest.first.name);
+          }),
         ],
       ),
     );
