@@ -367,7 +367,11 @@ class JeebliController extends ChangeNotifier {
     _deliveryTimer?.cancel();
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
+      await prefs.remove('is_logged_in');
+      await prefs.remove('user_role');
+      await prefs.remove('customer_name');
+      await prefs.remove('customer_phone');
+      await prefs.remove('user_restaurant_id');
     } catch (e) {
       debugPrint('Session clear note: $e');
     }
@@ -404,6 +408,9 @@ class JeebliController extends ChangeNotifier {
           final map = jsonDecode(j) as Map<String, dynamic>;
           _restaurants.add(Restaurant.fromMap(map, map['id'] ?? ''));
         }
+      } else {
+        // إذا كانت القائمة فارغة نحفظ القائمة المبدئية
+        _saveLocalData();
       }
       final prodsJson = prefs.getStringList('local_products') ?? [];
       if (prodsJson.isNotEmpty) {
@@ -412,6 +419,8 @@ class JeebliController extends ChangeNotifier {
           final map = jsonDecode(j) as Map<String, dynamic>;
           _products.add(Product.fromMap(map, map['id'] ?? ''));
         }
+      } else {
+        _saveLocalData();
       }
       notifyListeners();
     } catch (e) {
@@ -423,25 +432,34 @@ class JeebliController extends ChangeNotifier {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      // Listen to real-time restaurant changes from Firebase
+      // Listen to real-time restaurant changes from Firebase (دمج بدون مسح البيانات المحلية)
       firestore.collection('restaurants').snapshots().listen((snapshot) {
         if (snapshot.docs.isNotEmpty) {
-          _restaurants.clear();
           for (var doc in snapshot.docs) {
-            _restaurants.add(Restaurant.fromMap(doc.data(), doc.id));
+            final r = Restaurant.fromMap(doc.data(), doc.id);
+            final idx = _restaurants.indexWhere((item) => item.id == r.id);
+            if (idx >= 0) {
+              _restaurants[idx] = r;
+            } else {
+              _restaurants.add(r);
+            }
           }
           _saveLocalData();
           notifyListeners();
         }
-        // إذا Firestore فارغ نبقي البيانات المحلية كما هي
       }, onError: (e) => debugPrint('Firestore restaurants sync note: $e'));
 
-      // Listen to real-time product changes from Firebase
+      // Listen to real-time product changes from Firebase (دمج بدون مسح)
       firestore.collection('products').snapshots().listen((snapshot) {
         if (snapshot.docs.isNotEmpty) {
-          _products.clear();
           for (var doc in snapshot.docs) {
-            _products.add(Product.fromMap(doc.data(), doc.id));
+            final p = Product.fromMap(doc.data(), doc.id);
+            final idx = _products.indexWhere((item) => item.id == p.id);
+            if (idx >= 0) {
+              _products[idx] = p;
+            } else {
+              _products.add(p);
+            }
           }
           _saveLocalData();
           notifyListeners();
