@@ -68,8 +68,8 @@ class Restaurant {
     this.deliveryFee = 1500,
     this.ownerPhone,
     this.ownerPassword,
-    this.openHour = 10,
-    this.closeHour = 23,
+    this.openHour = 0,
+    this.closeHour = 24,
   });
 
   bool get isOpenNow {
@@ -138,8 +138,8 @@ class Restaurant {
       deliveryFee: (map['deliveryFee'] ?? 1500).toDouble(),
       ownerPhone: map['ownerPhone'],
       ownerPassword: map['ownerPassword'],
-      openHour: map['openHour'] ?? 10,
-      closeHour: map['closeHour'] ?? 23,
+      openHour: map['openHour'] ?? 0,
+      closeHour: map['closeHour'] ?? 24,
     );
   }
 }
@@ -410,8 +410,8 @@ class JeebliController extends ChangeNotifier {
       ownerPhone: '07802019730',
       ownerPassword: '123456',
       deliveryFee: 1500,
-      openHour: 10,
-      closeHour: 23,
+      openHour: 0,
+      closeHour: 24,
     ),
     Restaurant(
       id: 'abualabd',
@@ -426,7 +426,7 @@ class JeebliController extends ChangeNotifier {
       ownerPhone: '07800108275',
       ownerPassword: '123456',
       deliveryFee: 1500,
-      openHour: 11,
+      openHour: 0,
       closeHour: 24,
     ),
   ];
