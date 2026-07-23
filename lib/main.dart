@@ -5695,6 +5695,14 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   _buildSettingsTile(Icons.history_rounded,
                       'سجل الطلبات', Colors.indigo,
                       onTap: () {}),
+                  _buildSettingsTile(Icons.share_rounded,
+                      'مشاركة التطبيق مع الأصدقاء 📲', Colors.greenAccent,
+                      onTap: () {
+                        final text = Uri.encodeComponent(
+                            '🍔 *تطبيق جيب لي ديلفري* 🛵\nأسرع منصة لتوصيل أشهى وجبات المطاعم إلى باب بيتك بضغطة زر!\nجربه الآن واطلب وجبتك المفضل بسهولة 🚀');
+                        launchUrl(Uri.parse('https://wa.me/?text=$text'),
+                            mode: LaunchMode.externalApplication);
+                      }),
                   _buildSettingsTile(Icons.help_outline_rounded,
                       'الدعم والمساعدة', Colors.teal, onTap: () {}),
                   const Divider(height: 0.5, color: Colors.white12),
