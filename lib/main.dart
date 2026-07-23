@@ -473,7 +473,7 @@ class JeebliController extends ChangeNotifier {
   String customerId = 'user_${Random().nextInt(99999)}';
   String customerName = '';
   String customerPhone = '';
-  String selectedNeighborhood = 'حي العسكري (الهاشمية)';
+  String selectedNeighborhood = '';
   String streetDetails = '';
   String orderNotes = '';
   PaymentMethod paymentMethod = PaymentMethod.cod;
@@ -1518,7 +1518,7 @@ class _SplashScreenState extends State<SplashScreen>
                     child: FadeTransition(
                       opacity: _taglineFade,
                       child: const Text(
-                        'الهاشمية • الحمزة الغربي',
+                        'أسرع توصيل • أشهى الوجبات 🛵',
                         style: TextStyle(
                           fontSize: 12,
                           color: Color(0xFFFF8F00),
@@ -2214,7 +2214,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
         'icon': Icons.local_offer_rounded,
       },
       {
-        'title': '🛵 توصيل مجاني لمناطق الهاشمية',
+        'title': '🛵 توصيل فوري وسريع لجميع الوجبات',
         'desc': 'للطلبات التي تتجاوز 15,000 د.ع طوال هذا الأسبوع',
         'badge': 'توصيل مجاني',
         'colors': [const Color(0xFF0D9488), const Color(0xFF14B8A6)],
@@ -4233,7 +4233,7 @@ class ThankYouScreen extends StatelessWidget {
                       color: Colors.white)),
               const SizedBox(height: 10),
               const Text(
-                'آراؤكم تساعدنا في تطوير "جيب لي" وتقديم خدمة أفضل لأهالي الهاشمية والحمزة الغربي.',
+                'آراؤكم تساعدنا في تطوير "جيب لي" وتقديم أفضل خدمة توصيل دائماً ⭐️',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 13, color: Colors.white54, height: 1.6),
@@ -6160,7 +6160,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             letterSpacing: 1.2)),
                     const SizedBox(height: 8),
                     const Text(
-                      'منصة التوصيل الحصرية لأحياء الهاشمية والمناطق التابعة',
+                      'منصتك الأولى لتوصيل أشهى وجبات المطاعم بضغطة زر 🚀',
                       style: TextStyle(
                           fontSize: 13,
                           color: Colors.white70,
