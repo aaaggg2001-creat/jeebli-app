@@ -469,6 +469,7 @@ class JeebliController extends ChangeNotifier {
   String customerPhone = '';
   String selectedNeighborhood = 'حي العسكري (الهاشمية)';
   String streetDetails = '';
+  String orderNotes = '';
   PaymentMethod paymentMethod = PaymentMethod.cod;
   String cardNumber = '';
   String cardExpiry = '';
@@ -674,6 +675,84 @@ class JeebliController extends ChangeNotifier {
       playFeedbackSound();
       notifyListeners();
     }
+  }
+
+  void updateRestaurantDetails(
+    String restaurantId, {
+    String? name,
+    String? whatsappNumber,
+    double? deliveryFee,
+    String? deliveryTime,
+    String? description,
+    String? imageUrl,
+  }) {
+    final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
+    if (idx >= 0) {
+      final r = _restaurants[idx];
+      _restaurants[idx] = Restaurant(
+        id: r.id,
+        name: name ?? r.name,
+        location: r.location,
+        cuisine: r.cuisine,
+        rating: r.rating,
+        deliveryTime: deliveryTime ?? r.deliveryTime,
+        imageUrl: imageUrl ?? r.imageUrl,
+        description: description ?? r.description,
+        whatsappNumber: whatsappNumber ?? r.whatsappNumber,
+        isActive: r.isActive,
+        isClosedManually: r.isClosedManually,
+        serviceArea: r.serviceArea,
+        deliveryFee: deliveryFee ?? r.deliveryFee,
+        ownerPhone: r.ownerPhone,
+        ownerPassword: r.ownerPassword,
+        openHour: r.openHour,
+        closeHour: r.closeHour,
+      );
+      try {
+        FirebaseFirestore.instance
+            .collection('restaurants')
+            .doc(restaurantId)
+            .update(_restaurants[idx].toMap());
+      } catch (_) {}
+      playFeedbackSound();
+      notifyListeners();
+    }
+  }
+
+  bool loginOwnerOrAdmin(String phone, String password) {
+    if (phone == '07802019730' && password == '@a20012005b@') {
+      _isLoggedIn = true;
+      _userRole = 'superadmin';
+      saveSession();
+      notifyListeners();
+      return true;
+    }
+
+    final rest = _restaurants.firstWhere(
+      (r) => r.ownerPhone == phone && r.ownerPassword == password,
+      orElse: () => Restaurant(
+        id: '',
+        name: '',
+        location: '',
+        cuisine: '',
+        rating: 0,
+        deliveryTime: '',
+        imageUrl: '',
+        description: '',
+        whatsappNumber: '',
+      ),
+    );
+
+    if (rest.id.isNotEmpty) {
+      _isLoggedIn = true;
+      _userRole = 'owner';
+      _userRestaurantId = rest.id;
+      saveSession();
+      notifyListeners();
+      return true;
+    }
+
+    return false;
   }
 
   void updateDeliveryFee(String restaurantId, double fee) {
@@ -914,32 +993,46 @@ class JeebliController extends ChangeNotifier {
       'timestamp': DateTime.now().toIso8601String(),
     });
 
-    String phoneNumber = '9647865448004';
-    if (_activeRestaurant?.id == 'abualabd') {
-      phoneNumber = '9647800108275';
+    final restName = _activeRestaurant?.name ?? 'المطعم';
+    final rawPhone = _activeRestaurant?.whatsappNumber.isNotEmpty == true
+        ? _activeRestaurant!.whatsappNumber
+        : '07802019730';
+
+    String phoneNumber = rawPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (phoneNumber.startsWith('0')) {
+      phoneNumber = '964${phoneNumber.substring(1)}';
+    } else if (!phoneNumber.startsWith('964')) {
+      phoneNumber = '964$phoneNumber';
     }
 
     final itemsText = _cartItems
-        .map((i) => '${i.quantity}× ${i.product.name}')
+        .map((i) => '• ${i.quantity}× ${i.product.name} (${i.totalPrice.toStringAsFixed(0)} د.ع)')
         .join('\n');
 
+    final notesSection = orderNotes.trim().isNotEmpty
+        ? '\n📝 *ملاحظات الطلب:* ${orderNotes.trim()}'
+        : '';
+
     final message = '''
-🍔 *طلب جديد من جيبلي ديلفري*
-
-👤 *الاسم:* $customerName
-📱 *الهاتف:* $customerPhone
+🧾 *طلب جديد - جيب لي ديلفري* 🛵
+--------------------------------
+🏪 *المطعم:* $restName
+--------------------------------
+👤 *اسم الزبون:* $customerName
+📞 *رقم الهاتف:* $customerPhone
 📍 *المنطقة:* $selectedNeighborhood
-🏠 *نقطة التوصيل:* $streetDetails
-
-📋 *الوجبات:*
+🏠 *أقرب نقطة دالة:* $streetDetails$notesSection
+--------------------------------
+🍔 *الوجبات المطلوبة:*
 $itemsText
+--------------------------------
+💵 *مجموع الوجبات:* ${subtotal.toStringAsFixed(0)} د.ع
+🛵 *أجور التوصيل:* ${deliveryFee.toStringAsFixed(0)} د.ع${loyaltyDiscount > 0 ? '\n🌟 *خصم النقاط:* -${loyaltyDiscount.toStringAsFixed(0)} د.ع' : ''}
+💰 *المبلغ الصافي المطلوب:* ${totalAmount.toStringAsFixed(0)} د.ع
 
-💰 *مجموع الوجبات:* ${subtotal.toStringAsFixed(0)} د.ع
-🛵 *رسوم التوصيل:* ${deliveryFee.toStringAsFixed(0)} د.ع
-✅ *الإجمالي الكلي:* ${totalAmount.toStringAsFixed(0)} د.ع
-
-💳 *طريقة الدفع:* ${paymentMethod == PaymentMethod.cod ? 'كاش عند الاستلام' : 'ماستركارد'}${loyaltyDiscount > 0 ? '\n🌟 *خصم النقاط:* -${loyaltyDiscount.toStringAsFixed(0)} د.ع' : ''}
-🔐 *رمز الأمان:* $_lastOrderToken
+💳 *طريقة الدفع:* ${paymentMethod == PaymentMethod.cod ? 'كاش عند الاستلام' : 'ماستركارد'}
+--------------------------------
+شكراً لطلبكم عبر تطبيق جيب لي! 🚀
 ''';
 
     final uri = Uri.parse(
@@ -948,6 +1041,9 @@ $itemsText
       debugPrint('Error launching WhatsApp: $e');
       return false;
     });
+
+    // Save customer name and phone in session for future orders
+    saveSession();
 
     return true;
   }
@@ -1490,8 +1586,6 @@ class AppRouteNavigator extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = JeebliProvider.of(context);
 
-    if (!controller.isLoggedIn) return const LoginScreen();
-
     if (controller.userRole == 'superadmin') {
       return const SuperAdminShell();
     }
@@ -1500,6 +1594,7 @@ class AppRouteNavigator extends StatelessWidget {
       return const RestaurantOwnerAdminScreen();
     }
 
+    // الزبائن يدخلون مباشرة إلى التصفح والرئيسية بدون شاشة تسجيل الدخول
     return const MainNavigationShell();
   }
 }
@@ -1685,6 +1780,24 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                           ],
                         ),
                       ),
+                      IconButton(
+                        onPressed: () => _showOwnerLoginModal(context, controller),
+                        tooltip: 'دخول الإدارة وأصحاب المطاعم 🔑',
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.12),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                          ),
+                          child: const Icon(
+                            Icons.vpn_key_rounded,
+                            color: Colors.amber,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                       IconButton(
                         onPressed: () => controller.toggleTheme(),
                         tooltip: controller.isDarkMode
@@ -3019,6 +3132,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             ? 'الرجاء إدخال نقطة دالة'
                             : null,
                         onChanged: (v) => controller.streetDetails = v),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                        label: 'ملاحظات الطلب (اختياري)',
+                        icon: Icons.note_alt_outlined,
+                        hint: 'مثال: بدون ثومية، تثقيل صوص، حار...',
+                        validator: (v) => null,
+                        onChanged: (v) => controller.orderNotes = v),
                   ],
                 ),
               ),
@@ -4259,6 +4379,12 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.edit_note_rounded, color: Colors.amber),
+            tooltip: 'تعديل بيانات المطعم',
+            onPressed: () => _showOwnerEditRestaurantDialog(
+                context, controller, controller.userRestaurantId ?? 'akkala'),
+          ),
+          IconButton(
             icon: const Icon(Icons.logout, color: Colors.redAccent),
             tooltip: 'تسجيل الخروج',
             onPressed: () => _showLogoutDialog(context, controller),
@@ -4714,6 +4840,169 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
+  final phoneCtrl = TextEditingController();
+  final passCtrl = TextEditingController();
+
+  showDialog(
+    context: context,
+    builder: (ctx) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.vpn_key_rounded, color: Colors.amber, size: 24),
+            SizedBox(width: 8),
+            Text('دخول الإدارة وأصحاب المطاعم 🔑',
+                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('سجّل دخولك لمتابعة لوحة تحكم مطعمك أو إدارة التطبيق:',
+                style: TextStyle(color: Colors.white70, fontSize: 12)),
+            const SizedBox(height: 14),
+            TextField(
+              controller: phoneCtrl,
+              keyboardType: TextInputType.phone,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'رقم الهاتف',
+                labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+                prefixIcon: const Icon(Icons.phone_outlined, color: Colors.amber, size: 20),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.05),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: passCtrl,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'كلمة السر',
+                labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+                prefixIcon: const Icon(Icons.lock_outline, color: Colors.amber, size: 20),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.05),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            onPressed: () {
+              final phone = phoneCtrl.text.trim();
+              final pass = passCtrl.text.trim();
+              if (phone.isEmpty || pass.isEmpty) return;
+
+              bool success = controller.loginOwnerOrAdmin(phone, pass);
+              if (success) {
+                Navigator.pop(ctx);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('رقم الهاتف أو كلمة السر غير صحيحة ❌'),
+                    backgroundColor: Colors.red,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF8F00), foregroundColor: Colors.white),
+            child: const Text('دخول اللوحة 🚀'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+void _showOwnerEditRestaurantDialog(
+    BuildContext context, JeebliController ctrl, String restId) {
+  final rest = ctrl.allRestaurants.firstWhere(
+    (r) => r.id == restId,
+    orElse: () => ctrl.allRestaurants.first,
+  );
+
+  final nameCtrl = TextEditingController(text: rest.name);
+  final waCtrl = TextEditingController(text: rest.whatsappNumber);
+  final feeCtrl = TextEditingController(text: rest.deliveryFee.toStringAsFixed(0));
+  final timeCtrl = TextEditingController(text: rest.deliveryTime);
+  final descCtrl = TextEditingController(text: rest.description);
+  final imgCtrl = TextEditingController(text: rest.imageUrl);
+
+  showDialog(
+    context: context,
+    builder: (ctx) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('تعديل بيانات المطعم ✏️',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _darkInput('اسم المطعم', nameCtrl),
+              const SizedBox(height: 8),
+              _darkInput('رقم الواتساب لاستقبال الطلبات', waCtrl, type: TextInputType.phone),
+              const SizedBox(height: 8),
+              _darkInput('أجور التوصيل (د.ع)', feeCtrl, type: TextInputType.number),
+              const SizedBox(height: 8),
+              _darkInput('وقت التوصيل المتوقع (مثال: 20-30 دقيقة)', timeCtrl),
+              const SizedBox(height: 8),
+              _darkInput('وصف المطعم', descCtrl),
+              const SizedBox(height: 8),
+              _darkInput('رابط صورة المطعم', imgCtrl),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            onPressed: () {
+              final fee = double.tryParse(feeCtrl.text) ?? rest.deliveryFee;
+              ctrl.updateRestaurantDetails(
+                rest.id,
+                name: nameCtrl.text.trim(),
+                whatsappNumber: waCtrl.text.trim(),
+                deliveryFee: fee,
+                deliveryTime: timeCtrl.text.trim(),
+                description: descCtrl.text.trim(),
+                imageUrl: imgCtrl.text.trim(),
+              );
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('تم تحديث بيانات المطعم بنجاح ✅'),
+                  backgroundColor: Colors.green,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF8F00), foregroundColor: Colors.white),
+            child: const Text('حفظ التعديلات'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 void _showOwnerProductDialog(
