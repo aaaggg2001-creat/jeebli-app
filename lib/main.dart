@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
 import 'super_admin_screen.dart';
 
 void main() async {
@@ -42,6 +44,8 @@ class Restaurant {
   final String description;
   final String whatsappNumber;
   bool isActive;
+  bool isClosedManually;
+  String serviceArea;
   double deliveryFee;
   String? ownerPhone;
   String? ownerPassword;
@@ -59,6 +63,8 @@ class Restaurant {
     required this.description,
     required this.whatsappNumber,
     this.isActive = true,
+    this.isClosedManually = false,
+    this.serviceArea = 'الهاشمية',
     this.deliveryFee = 1500,
     this.ownerPhone,
     this.ownerPassword,
@@ -67,6 +73,7 @@ class Restaurant {
   });
 
   bool get isOpenNow {
+    if (isClosedManually) return false;
     final now = DateTime.now();
     final hour = now.hour;
     if (openHour < closeHour) {
@@ -98,6 +105,8 @@ class Restaurant {
       'description': description,
       'whatsappNumber': whatsappNumber,
       'isActive': isActive,
+      'isClosedManually': isClosedManually,
+      'serviceArea': serviceArea,
       'deliveryFee': deliveryFee,
       'ownerPhone': ownerPhone,
       'ownerPassword': ownerPassword,
@@ -118,6 +127,8 @@ class Restaurant {
       description: map['description'] ?? '',
       whatsappNumber: map['whatsappNumber'] ?? '',
       isActive: map['isActive'] ?? true,
+      isClosedManually: map['isClosedManually'] ?? false,
+      serviceArea: map['serviceArea'] ?? 'الهاشمية',
       deliveryFee: (map['deliveryFee'] ?? 1500).toDouble(),
       ownerPhone: map['ownerPhone'],
       ownerPassword: map['ownerPassword'],
@@ -287,6 +298,55 @@ class JeebliController extends ChangeNotifier {
 
   JeebliController() {
     _initFirebaseSync();
+    _loadSavedSession();
+  }
+
+  void _loadSavedSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final loggedIn = prefs.getBool('is_logged_in') ?? false;
+      if (loggedIn) {
+        _isLoggedIn = true;
+        _userRole = prefs.getString('user_role');
+        customerName = prefs.getString('customer_name') ?? '';
+        customerPhone = prefs.getString('customer_phone') ?? '';
+        _userRestaurantId = prefs.getString('user_restaurant_id');
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Session load note: $e');
+    }
+  }
+
+  void saveSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_logged_in', _isLoggedIn);
+      if (_userRole != null) await prefs.setString('user_role', _userRole!);
+      await prefs.setString('customer_name', customerName);
+      await prefs.setString('customer_phone', customerPhone);
+      if (_userRestaurantId != null) await prefs.setString('user_restaurant_id', _userRestaurantId!);
+    } catch (e) {
+      debugPrint('Session save note: $e');
+    }
+  }
+
+  void logout() async {
+    _deliveryTimer?.cancel();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+    } catch (e) {
+      debugPrint('Session clear note: $e');
+    }
+    _isLoggedIn = false;
+    _userRole = null;
+    _userEmailOrPhone = null;
+    _userRestaurantId = null;
+    _activeRestaurant = null;
+    _currentTab = 0;
+    _playClickFeedback();
+    notifyListeners();
   }
 
   void _initFirebaseSync() {
@@ -600,6 +660,22 @@ class JeebliController extends ChangeNotifier {
     }
   }
 
+  /// صاحب المطعم يغلق أو يفتح مطعمه يدوياً
+  void toggleRestaurantClosed(String restaurantId) {
+    final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
+    if (idx >= 0) {
+      _restaurants[idx].isClosedManually = !_restaurants[idx].isClosedManually;
+      try {
+        FirebaseFirestore.instance
+            .collection('restaurants')
+            .doc(restaurantId)
+            .update({'isClosedManually': _restaurants[idx].isClosedManually});
+      } catch (_) {}
+      playFeedbackSound();
+      notifyListeners();
+    }
+  }
+
   void updateDeliveryFee(String restaurantId, double fee) {
     final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
     if (idx >= 0) {
@@ -785,6 +861,8 @@ class JeebliController extends ChangeNotifier {
   }
 
   void setActiveRestaurant(Restaurant? restaurant) {
+    // لا تسمح بالدخول إذا المطعم مغلق يدوياً أو خارج ساعات العمل
+    if (restaurant != null && !restaurant.isOpenNow) return;
     _activeRestaurant = restaurant;
     _selectedCategoryId = 'all';
     playFeedbackSound();
@@ -1021,6 +1099,7 @@ $itemsText
       _userEmailOrPhone = phone;
       customerName = name;
       customerPhone = phone;
+      saveSession();
       _addNotification('🔑 أهلاً بك $name! تم تسجيل الدخول بنجاح.');
       notifyListeners();
       return true;
@@ -1032,6 +1111,7 @@ $itemsText
         _isLoggedIn = true;
         _userRole = 'superadmin';
         _userEmailOrPhone = idNormalized;
+        saveSession();
         _addNotification('🔑 مرحباً بك في لوحة الإدارة العليا!');
         notifyListeners();
         return true;
@@ -1044,6 +1124,7 @@ $itemsText
           _userRole = 'owner';
           _userEmailOrPhone = idNormalized;
           _userRestaurantId = r.id;
+          saveSession();
           _addNotification('🏪 مرحباً بك! تم تسجيل دخولك كمالك لـ ${r.name}',
               isOwnerNotification: true);
           notifyListeners();
@@ -1053,18 +1134,6 @@ $itemsText
     }
 
     return false;
-  }
-
-  void logout() {
-    _deliveryTimer?.cancel();
-    _isLoggedIn = false;
-    _userRole = null;
-    _userEmailOrPhone = null;
-    _userRestaurantId = null;
-    _currentTab = 0;
-    _activeRestaurant = null;
-    _playClickFeedback();
-    notifyListeners();
   }
 }
 
@@ -1729,7 +1798,36 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                       border: Border.all(color: controller.borderColor),
                     ),
                     child: InkWell(
-                      onTap: () => controller.setActiveRestaurant(rest),
+                      onTap: () {
+                        if (!rest.isOpenNow) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.store_mall_directory_outlined,
+                                      color: Colors.white, size: 20),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      '${rest.name} مغلق حالياً 🔴\nالطلب غير متاح في هذا الوقت',
+                                      style: const TextStyle(
+                                          fontSize: 13, height: 1.4),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              backgroundColor: Colors.red[800],
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              margin: const EdgeInsets.all(16),
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                          return;
+                        }
+                        controller.setActiveRestaurant(rest);
+                      },
                       borderRadius: BorderRadius.circular(24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1749,6 +1847,34 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                         child: const Icon(Icons.restaurant,
                                             color: Colors.white24, size: 50))),
                               ),
+                              // overlay مغلق فوق الصورة
+                              if (!rest.isOpenNow)
+                                Positioned.fill(
+                                  child: ClipRRect(
+                                    borderRadius: const BorderRadius.vertical(
+                                        top: Radius.circular(24)),
+                                    child: Container(
+                                      color: Colors.black.withOpacity(0.6),
+                                      child: const Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.lock_outline_rounded,
+                                                color: Colors.redAccent,
+                                                size: 40),
+                                            SizedBox(height: 8),
+                                            Text('مغلق',
+                                                style: TextStyle(
+                                                    fontSize: 22,
+                                                    fontWeight: FontWeight.w900,
+                                                    color: Colors.redAccent,
+                                                    letterSpacing: 2)),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               Positioned(
                                 top: 12,
                                 left: 12,
@@ -4176,6 +4302,9 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             ]),
           ),
           const SizedBox(height: 16),
+          // ─── بطاقة حالة المطعم (مفتوح / مغلق) ───
+          _buildRestaurantStatusCard(context, controller),
+          const SizedBox(height: 16),
           _buildVendorAnalyticsCard(context, controller, controller.userRestaurantId ?? 'akkala'),
           const SizedBox(height: 18),
           if (isAkkalaOwner)
@@ -4191,6 +4320,132 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             _buildRestSection(context, controller, 'abualabd',
                 'مطعم أبو العبد (الحمزة الغربي)'),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// بطاقة تحكم حالة المطعم مفتوح / مغلق
+  Widget _buildRestaurantStatusCard(
+      BuildContext context, JeebliController controller) {
+    final restId = controller.userRestaurantId ?? 'akkala';
+    final restaurant = controller.allRestaurants.firstWhere(
+      (r) => r.id == restId,
+      orElse: () => controller.allRestaurants.first,
+    );
+    final isClosed = restaurant.isClosedManually;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isClosed
+              ? [const Color(0xFF3D0000), const Color(0xFF1E293B)]
+              : [const Color(0xFF003D1E), const Color(0xFF1E293B)],
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isClosed
+              ? Colors.redAccent.withOpacity(0.5)
+              : Colors.greenAccent.withOpacity(0.5),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: (isClosed ? Colors.red : Colors.green).withOpacity(0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: (isClosed ? Colors.redAccent : Colors.greenAccent)
+                  .withOpacity(0.15),
+              border: Border.all(
+                color: isClosed ? Colors.redAccent : Colors.greenAccent,
+                width: 1.5,
+              ),
+            ),
+            child: Icon(
+              isClosed ? Icons.store_mall_directory_outlined : Icons.storefront_rounded,
+              color: isClosed ? Colors.redAccent : Colors.greenAccent,
+              size: 26,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isClosed ? '🔴 مطعمك مغلق حالياً' : '🟢 مطعمك مفتوح للطلبات',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: isClosed ? Colors.redAccent : Colors.greenAccent,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isClosed
+                      ? 'الزبائن لا يستطيعون الطلب الآن'
+                      : 'الزبائن يستطيعون الطلب منك الآن',
+                  style: const TextStyle(fontSize: 11, color: Colors.white54),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: () => controller.toggleRestaurantClosed(restId),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              width: 64,
+              height: 34,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                color: isClosed
+                    ? Colors.redAccent.withOpacity(0.3)
+                    : Colors.greenAccent.withOpacity(0.3),
+                border: Border.all(
+                  color: isClosed ? Colors.redAccent : Colors.greenAccent,
+                  width: 1.5,
+                ),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  AnimatedAlign(
+                    duration: const Duration(milliseconds: 300),
+                    alignment: isClosed
+                        ? Alignment.centerLeft
+                        : Alignment.centerRight,
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isClosed ? Colors.redAccent : Colors.greenAccent,
+                      ),
+                      child: Icon(
+                        isClosed ? Icons.close : Icons.check,
+                        size: 14,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -5792,4 +6047,182 @@ class SuperAdminScreenEntry extends StatelessWidget {
     // super_admin_screen.dart يُعرِّف SuperAdminScreen
     return const SuperAdminScreen();
   }
+}
+
+/// ============================================================================
+/// مساعد اختيار الصور (معرض / كاميرا / رابط URL)
+/// ============================================================================
+void showImagePickerOptions(
+    BuildContext context, Function(String imagePathOrUrl) onImageSelected) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: const Color(0xFF1E293B),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (ctx) {
+      return Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[600],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'اختر طريقة إضافة الصورة 📸',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const ContainerIcon(
+                    icon: Icons.camera_alt_rounded, color: Colors.orangeAccent),
+                title: const Text('التقاط بواسطة الكاميرا 📷',
+                    style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('افتح الكاميرا والتقط صورة مباشرة',
+                    style: TextStyle(color: Colors.grey, fontSize: 11)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    final picker = ImagePicker();
+                    final file = await picker.pickImage(
+                        source: ImageSource.camera,
+                        maxWidth: 800,
+                        maxHeight: 800,
+                        imageQuality: 80);
+                    if (file != null) {
+                      final bytes = await file.readAsBytes();
+                      final b64 = base64Encode(bytes);
+                      onImageSelected('data:image/jpeg;base64,$b64');
+                    }
+                  } catch (e) {
+                    debugPrint('Camera pick note: $e');
+                  }
+                },
+              ),
+              const Divider(color: Colors.white10),
+              ListTile(
+                leading: const ContainerIcon(
+                    icon: Icons.photo_library_rounded, color: Colors.amber),
+                title: const Text('اختيار من معرض الصور 🖼️',
+                    style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('اختر صورة مخزنة في هاتفك',
+                    style: TextStyle(color: Colors.grey, fontSize: 11)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    final picker = ImagePicker();
+                    final file = await picker.pickImage(
+                        source: ImageSource.gallery,
+                        maxWidth: 800,
+                        maxHeight: 800,
+                        imageQuality: 80);
+                    if (file != null) {
+                      final bytes = await file.readAsBytes();
+                      final b64 = base64Encode(bytes);
+                      onImageSelected('data:image/jpeg;base64,$b64');
+                    }
+                  } catch (e) {
+                    debugPrint('Gallery pick note: $e');
+                  }
+                },
+              ),
+              const Divider(color: Colors.white10),
+              ListTile(
+                leading: const ContainerIcon(
+                    icon: Icons.link_rounded, color: Colors.lightBlueAccent),
+                title: const Text('إدخال رابط صورة (URL) 🌐',
+                    style: TextStyle(color: Colors.white, fontSize: 14)),
+                subtitle: const Text('الصق رابط صورة مباشر من الإنترنت',
+                    style: TextStyle(color: Colors.grey, fontSize: 11)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showUrlInputDialog(context, onImageSelected);
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class ContainerIcon extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  const ContainerIcon({super.key, required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(icon, color: color, size: 20),
+    );
+  }
+}
+
+void _showUrlInputDialog(
+    BuildContext context, Function(String imagePathOrUrl) onImageSelected) {
+  final controller = TextEditingController();
+  showDialog(
+    context: context,
+    builder: (ctx) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('إدخال رابط صورة 🌐',
+            style: TextStyle(color: Colors.white, fontSize: 15)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'https://example.com/image.jpg',
+            hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.05),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isNotEmpty) {
+                onImageSelected(text);
+              }
+              Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber, foregroundColor: Colors.black),
+            child: const Text('حفظ الصورة',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    ),
+  );
 }
