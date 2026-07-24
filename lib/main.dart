@@ -513,9 +513,17 @@ class JeebliController extends ChangeNotifier {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      // Listen to real-time restaurant changes from Firebase
+      // ═══ مزامنة المطاعم - استبدال كامل للبيانات من Firestore ═══
       firestore.collection('restaurants').snapshots().listen((snapshot) {
         if (snapshot.docs.isNotEmpty) {
+          // استبدال البيانات من Firestore (الحقيقة المركزية)
+          // نحتفظ فقط بالمطاعم الافتراضية المضمّنة إذا لم تكن في Firestore
+          final firestoreIds = snapshot.docs.map((d) => d.id).toSet();
+          // احذف المطاعم المحذوفة من Firestore
+          _restaurants.removeWhere((r) =>
+              firestoreIds.contains(r.id) == false &&
+              snapshot.docs.isNotEmpty);
+          // أضف أو حدّث من Firestore
           for (var doc in snapshot.docs) {
             final r = Restaurant.fromMap(doc.data(), doc.id);
             final idx = _restaurants.indexWhere((item) => item.id == r.id);
@@ -527,12 +535,27 @@ class JeebliController extends ChangeNotifier {
           }
           _saveLocalData();
           notifyListeners();
+        } else {
+          // Firestore فارغة: ارفع المطاعم الافتراضية إلى Firestore لتصبح متاحة لجميع الأجهزة
+          for (final rest in _restaurants) {
+            firestore.collection('restaurants').doc(rest.id).set(rest.toMap());
+          }
+          // أيضاً ارفع المنتجات الافتراضية
+          for (final prod in _products) {
+            firestore.collection('products').doc(prod.id).set(prod.toMap());
+          }
+          // ارفع العروض الافتراضية
+          for (final offer in _offers) {
+            firestore.collection('offers').doc(offer.id).set(offer.toMap());
+          }
         }
       }, onError: (e) => debugPrint('Firestore restaurants sync note: $e'));
 
-      // Listen to real-time product changes from Firebase
+      // ═══ مزامنة المنتجات ═══
       firestore.collection('products').snapshots().listen((snapshot) {
         if (snapshot.docs.isNotEmpty) {
+          final firestoreIds = snapshot.docs.map((d) => d.id).toSet();
+          _products.removeWhere((p) => !firestoreIds.contains(p.id));
           for (var doc in snapshot.docs) {
             final p = Product.fromMap(doc.data(), doc.id);
             final idx = _products.indexWhere((item) => item.id == p.id);
@@ -547,21 +570,21 @@ class JeebliController extends ChangeNotifier {
         }
       }, onError: (e) => debugPrint('Firestore products sync note: $e'));
 
-      // Listen to real-time offer changes from Firebase
+      // ═══ مزامنة العروض ═══
       firestore.collection('offers').snapshots().listen((snapshot) {
-        if (snapshot.docs.isNotEmpty) {
-          for (var doc in snapshot.docs) {
-            final o = Offer.fromMap(doc.data(), doc.id);
-            final idx = _offers.indexWhere((item) => item.id == o.id);
-            if (idx >= 0) {
-              _offers[idx] = o;
-            } else {
-              _offers.add(o);
-            }
+        final firestoreIds = snapshot.docs.map((d) => d.id).toSet();
+        _offers.removeWhere((o) => !firestoreIds.contains(o.id));
+        for (var doc in snapshot.docs) {
+          final o = Offer.fromMap(doc.data(), doc.id);
+          final idx = _offers.indexWhere((item) => item.id == o.id);
+          if (idx >= 0) {
+            _offers[idx] = o;
+          } else {
+            _offers.add(o);
           }
-          _saveLocalData();
-          notifyListeners();
         }
+        _saveLocalData();
+        notifyListeners();
       }, onError: (e) => debugPrint('Firestore offers sync note: $e'));
     } catch (e) {
       debugPrint('Firestore sync init note: $e');
@@ -647,6 +670,7 @@ class JeebliController extends ChangeNotifier {
   String customerName = '';
   String customerPhone = '';
   String selectedNeighborhood = '';
+  String customerAvatarUrl = '';
   String streetDetails = '';
   String orderNotes = '';
   bool isLocating = false;
@@ -955,13 +979,19 @@ class JeebliController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// تحديث موقع المطعم (lat/lng) من صاحبه
+  /// تحديث موقع المطعم (lat/lng) من صاحبه - يُحفظ في Firestore ليظهر للجميع
   void updateRestaurantLocation(String restaurantId, double lat, double lng) {
     final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
     if (idx >= 0) {
       _restaurants[idx].restaurantLat = lat;
       _restaurants[idx].restaurantLng = lng;
       _saveLocalData();
+      try {
+        FirebaseFirestore.instance
+            .collection('restaurants')
+            .doc(restaurantId)
+            .update({'restaurantLat': lat, 'restaurantLng': lng});
+      } catch (_) {}
       notifyListeners();
     }
   }
@@ -1137,6 +1167,12 @@ class JeebliController extends ChangeNotifier {
         clearDiscount: clearDiscount,
       );
       _saveLocalData();
+      try {
+        FirebaseFirestore.instance
+            .collection('products')
+            .doc(productId)
+            .update(_products[idx].toMap());
+      } catch (_) {}
       notifyListeners();
     }
   }
@@ -1146,6 +1182,12 @@ class JeebliController extends ChangeNotifier {
     if (idx >= 0) {
       _products[idx] = _products[idx].copyWith(isAvailable: !_products[idx].isAvailable);
       _saveLocalData();
+      try {
+        FirebaseFirestore.instance
+            .collection('products')
+            .doc(productId)
+            .update({'isAvailable': _products[idx].isAvailable});
+      } catch (_) {}
       playFeedbackSound();
       notifyListeners();
     }
@@ -6917,6 +6959,9 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
           },
         ),
       ],
+    );
+  }
+
   void _showPickAvatarModal(BuildContext context, JeebliController controller) {
     final urlC = TextEditingController(text: controller.customerAvatarUrl);
 
