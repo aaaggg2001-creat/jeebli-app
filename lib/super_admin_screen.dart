@@ -375,7 +375,7 @@ class _RestaurantsTab extends StatelessWidget {
                             rating: 4.5,
                             deliveryTime: '20-35 دقيقة',
                             description: descC.text.trim().isEmpty ? 'مطعم مميز في الهاشمية' : descC.text.trim(),
-                            whatsappNumber: waC.text.trim(),
+                            whatsappNumber: formatWhatsAppNumber(waC.text.trim()),
                             imageUrl: imgC.text.trim().isEmpty
                                 ? 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80'
                                 : imgC.text.trim(),

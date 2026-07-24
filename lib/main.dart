@@ -281,6 +281,74 @@ class LoyaltyEntry {
   LoyaltyEntry({required this.points, required this.reason, required this.date});
 }
 
+/// تنسيق رقم الهاتف ليناسب الواتساب بشكل دقيق وبدون خطأ (07/964/+964)
+String formatWhatsAppNumber(String rawPhone) {
+  var cleaned = rawPhone.replaceAll(RegExp(r'[^\d+]'), '');
+  if (cleaned.startsWith('+')) {
+    cleaned = cleaned.substring(1);
+  }
+  if (cleaned.startsWith('07')) {
+    cleaned = '964${cleaned.substring(1)}';
+  } else if (cleaned.startsWith('7') && cleaned.length == 10) {
+    cleaned = '964$cleaned';
+  } else if (!cleaned.startsWith('964') && cleaned.length == 10) {
+    cleaned = '964$cleaned';
+  }
+  return cleaned;
+}
+
+class Offer {
+  final String id;
+  final String restaurantId;
+  final String restaurantName;
+  final String title;
+  final String description;
+  final String discountTag; // مثال: "خصم 25%" / "عرض عائلي" / "توصيل مجاني"
+  final String imageUrl;
+  final String? promoCode;
+  bool isActive;
+
+  Offer({
+    required this.id,
+    required this.restaurantId,
+    required this.restaurantName,
+    required this.title,
+    required this.description,
+    required this.discountTag,
+    required this.imageUrl,
+    this.promoCode,
+    this.isActive = true,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'restaurantId': restaurantId,
+      'restaurantName': restaurantName,
+      'title': title,
+      'description': description,
+      'discountTag': discountTag,
+      'imageUrl': imageUrl,
+      'promoCode': promoCode,
+      'isActive': isActive,
+    };
+  }
+
+  factory Offer.fromMap(Map<String, dynamic> map, String docId) {
+    return Offer(
+      id: map['id'] ?? docId,
+      restaurantId: map['restaurantId'] ?? '',
+      restaurantName: map['restaurantName'] ?? '',
+      title: map['title'] ?? '',
+      description: map['description'] ?? '',
+      discountTag: map['discountTag'] ?? 'عرض خاص',
+      imageUrl: map['imageUrl'] ?? '',
+      promoCode: map['promoCode'],
+      isActive: map['isActive'] ?? true,
+    );
+  }
+}
+
 /// ============================================================================
 /// 2. نظام حماية الطلبات (Security & Anti-Hacking Simulator)
 /// ============================================================================
@@ -343,8 +411,9 @@ class JeebliController extends ChangeNotifier {
         customerName = prefs.getString('customer_name') ?? '';
         customerPhone = prefs.getString('customer_phone') ?? '';
         _userRestaurantId = prefs.getString('user_restaurant_id');
-        notifyListeners();
       }
+      customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
+      notifyListeners();
     } catch (e) {
       debugPrint('Session load note: $e');
     }
@@ -357,6 +426,7 @@ class JeebliController extends ChangeNotifier {
       if (_userRole != null) await prefs.setString('user_role', _userRole!);
       await prefs.setString('customer_name', customerName);
       await prefs.setString('customer_phone', customerPhone);
+      await prefs.setString('customer_avatar_url', customerAvatarUrl);
       if (_userRestaurantId != null) await prefs.setString('user_restaurant_id', _userRestaurantId!);
     } catch (e) {
       debugPrint('Session save note: $e');
@@ -393,6 +463,8 @@ class JeebliController extends ChangeNotifier {
       await prefs.setStringList('local_restaurants', restsJson);
       final prodsJson = _products.map((p) => jsonEncode(p.toMap())).toList();
       await prefs.setStringList('local_products', prodsJson);
+      final offersJson = _offers.map((o) => jsonEncode(o.toMap())).toList();
+      await prefs.setStringList('local_offers', offersJson);
     } catch (e) {
       debugPrint('Local save note: $e');
     }
@@ -409,7 +481,6 @@ class JeebliController extends ChangeNotifier {
           _restaurants.add(Restaurant.fromMap(map, map['id'] ?? ''));
         }
       } else {
-        // إذا كانت القائمة فارغة نحفظ القائمة المبدئية
         _saveLocalData();
       }
       final prodsJson = prefs.getStringList('local_products') ?? [];
@@ -418,6 +489,16 @@ class JeebliController extends ChangeNotifier {
         for (var j in prodsJson) {
           final map = jsonDecode(j) as Map<String, dynamic>;
           _products.add(Product.fromMap(map, map['id'] ?? ''));
+        }
+      } else {
+        _saveLocalData();
+      }
+      final offersJson = prefs.getStringList('local_offers') ?? [];
+      if (offersJson.isNotEmpty) {
+        _offers.clear();
+        for (var j in offersJson) {
+          final map = jsonDecode(j) as Map<String, dynamic>;
+          _offers.add(Offer.fromMap(map, map['id'] ?? ''));
         }
       } else {
         _saveLocalData();
@@ -432,7 +513,7 @@ class JeebliController extends ChangeNotifier {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      // Listen to real-time restaurant changes from Firebase (دمج بدون مسح البيانات المحلية)
+      // Listen to real-time restaurant changes from Firebase
       firestore.collection('restaurants').snapshots().listen((snapshot) {
         if (snapshot.docs.isNotEmpty) {
           for (var doc in snapshot.docs) {
@@ -449,7 +530,7 @@ class JeebliController extends ChangeNotifier {
         }
       }, onError: (e) => debugPrint('Firestore restaurants sync note: $e'));
 
-      // Listen to real-time product changes from Firebase (دمج بدون مسح)
+      // Listen to real-time product changes from Firebase
       firestore.collection('products').snapshots().listen((snapshot) {
         if (snapshot.docs.isNotEmpty) {
           for (var doc in snapshot.docs) {
@@ -465,6 +546,23 @@ class JeebliController extends ChangeNotifier {
           notifyListeners();
         }
       }, onError: (e) => debugPrint('Firestore products sync note: $e'));
+
+      // Listen to real-time offer changes from Firebase
+      firestore.collection('offers').snapshots().listen((snapshot) {
+        if (snapshot.docs.isNotEmpty) {
+          for (var doc in snapshot.docs) {
+            final o = Offer.fromMap(doc.data(), doc.id);
+            final idx = _offers.indexWhere((item) => item.id == o.id);
+            if (idx >= 0) {
+              _offers[idx] = o;
+            } else {
+              _offers.add(o);
+            }
+          }
+          _saveLocalData();
+          notifyListeners();
+        }
+      }, onError: (e) => debugPrint('Firestore offers sync note: $e'));
     } catch (e) {
       debugPrint('Firestore sync init note: $e');
     }
@@ -733,8 +831,89 @@ class JeebliController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Offers & Proximity ---
+  final List<Offer> _offers = [
+    Offer(
+      id: 'off_1',
+      restaurantId: 'akkala',
+      restaurantName: 'مطعم أكّالة',
+      title: 'عرض الوجبة العائلية 🍔🍟',
+      description: '4 برجر دبل لحم + 2 فنجر + لتر كولا بـ 18,000 د.ع فقط!',
+      discountTag: 'عرض عائلي 🔥',
+      imageUrl: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80',
+    ),
+    Offer(
+      id: 'off_2',
+      restaurantId: 'abualabd',
+      restaurantName: 'مطعم أبو العبد',
+      title: 'خصم 20% على شاورما الفحم 🌯',
+      description: 'استمتع بأشهى شاورما فحم في الحمزة بخصم 20% لفترة محدودة',
+      discountTag: 'خصم 20% ⚡',
+      imageUrl: 'https://images.unsplash.com/photo-1529006557810-274b9b2fc783?w=600&q=80',
+    ),
+  ];
+
+  List<Offer> get offers => _offers.where((o) => o.isActive).toList();
+  List<Offer> get allOffers => _offers;
+
+  void addOffer(Offer offer) {
+    _offers.add(offer);
+    _saveLocalData();
+    try {
+      FirebaseFirestore.instance
+          .collection('offers')
+          .doc(offer.id)
+          .set(offer.toMap());
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  void deleteOffer(String offerId) {
+    _offers.removeWhere((o) => o.id == offerId);
+    _saveLocalData();
+    try {
+      FirebaseFirestore.instance
+          .collection('offers')
+          .doc(offerId)
+          .delete();
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  void toggleOfferActive(String offerId) {
+    final idx = _offers.indexWhere((o) => o.id == offerId);
+    if (idx >= 0) {
+      _offers[idx].isActive = !_offers[idx].isActive;
+      _saveLocalData();
+      try {
+        FirebaseFirestore.instance
+            .collection('offers')
+            .doc(offerId)
+            .update({'isActive': _offers[idx].isActive});
+      } catch (_) {}
+      notifyListeners();
+    }
+  }
+
+  void updateCustomerAvatar(String url) {
+    customerAvatarUrl = url;
+    saveSession();
+    notifyListeners();
+  }
+
+  List<Restaurant> get restaurantsSortedByProximity {
+    if (customerLat == null || customerLng == null) return _restaurants;
+    final sorted = List<Restaurant>.from(_restaurants);
+    sorted.sort((a, b) {
+      final distA = a.distanceTo(customerLat, customerLng) ?? 999999;
+      final distB = b.distanceTo(customerLat, customerLng) ?? 999999;
+      return distA.compareTo(distB);
+    });
+    return sorted;
+  }
+
   // --- Getters ---
-  List<Restaurant> get restaurants => _restaurants;
+  List<Restaurant> get restaurants => restaurantsSortedByProximity;
   List<Restaurant> get allRestaurants => _restaurants;
   List<Product> get products => _products;
 
@@ -2248,24 +2427,57 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                               Positioned(
                                 top: 12,
                                 right: 12,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.8),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border:
-                                          Border.all(color: Colors.white24)),
-                                  child: Row(children: [
-                                    const Icon(Icons.location_on,
-                                        color: Color(0xFFFFB300), size: 14),
-                                    const SizedBox(width: 4),
-                                    Text(rest.location,
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold)),
-                                  ]),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                          color: Colors.black.withOpacity(0.8),
+                                          borderRadius: BorderRadius.circular(16),
+                                          border:
+                                              Border.all(color: Colors.white24)),
+                                      child: Row(children: [
+                                        const Icon(Icons.location_on,
+                                            color: Color(0xFFFFB300), size: 14),
+                                        const SizedBox(width: 4),
+                                        Text(rest.location,
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold)),
+                                      ]),
+                                    ),
+                                    if (rest.distanceTo(controller.customerLat, controller.customerLng) != null) ...[
+                                      const SizedBox(height: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF16A34A).withOpacity(0.95),
+                                          borderRadius: BorderRadius.circular(14),
+                                          boxShadow: const [
+                                            BoxShadow(color: Colors.black26, blurRadius: 4),
+                                          ],
+                                        ),
+                                        child: Row(children: [
+                                          const Icon(Icons.near_me_rounded,
+                                              color: Colors.white, size: 12),
+                                          const SizedBox(width: 4),
+                                          Builder(builder: (_) {
+                                            final d = rest.distanceTo(controller.customerLat, controller.customerLng)!;
+                                            final str = d < 1 ? '${(d * 1000).toInt()} متر' : '${d.toStringAsFixed(1)} كم';
+                                            return Text('يبعد $str',
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10.5,
+                                                    fontWeight: FontWeight.bold));
+                                          }),
+                                        ]),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                             ],
@@ -2428,89 +2640,97 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
   }
 
   Widget _buildPromoSlider(BuildContext context) {
-    final deals = [
-      {
-        'title': '🔥 خصم 25% من مطعم أكّالة',
-        'desc': 'استخدم كود الخصم JEEBLI25 على الوجبات السريعة',
-        'badge': 'عرض حصري',
-        'colors': [const Color(0xFFE65100), const Color(0xFFFF8F00)],
-        'icon': Icons.local_fire_department_rounded,
-      },
-      {
-        'title': '🍕 عرض العائلة من أبو العبد',
-        'desc': 'بيتزا عائلية كبيرة + بطاطس فنجر مجاناً اليوم',
-        'badge': 'توفير عائلي',
-        'colors': [const Color(0xFF1E293B), const Color(0xFF475569)],
-        'icon': Icons.local_offer_rounded,
-      },
-      {
-        'title': '🛵 توصيل فوري وسريع لجميع الوجبات',
-        'desc': 'للطلبات التي تتجاوز 15,000 د.ع طوال هذا الأسبوع',
-        'badge': 'توصيل مجاني',
-        'colors': [const Color(0xFF0D9488), const Color(0xFF14B8A6)],
-        'icon': Icons.delivery_dining_rounded,
-      },
-    ];
+    final controller = JeebliProvider.of(context);
+    final activeOffers = controller.offers;
+
+    if (activeOffers.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return SizedBox(
-      height: 120,
+      height: 125,
       child: PageView.builder(
         controller: PageController(viewportFraction: 0.92),
-        itemCount: deals.length,
+        itemCount: activeOffers.length,
         itemBuilder: (ctx, i) {
-          final deal = deals[i];
-          final colors = deal['colors'] as List<Color>;
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 5),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                  colors: colors,
-                  begin: Alignment.topRight,
-                  end: Alignment.bottomLeft),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                    color: colors.first.withOpacity(0.4),
-                    blurRadius: 12,
-                    offset: const Offset(0, 5))
-              ],
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.25),
-                            borderRadius: BorderRadius.circular(10)),
-                        child: Text(deal['badge'] as String,
+          final offer = activeOffers[i];
+          final gradientColors = (i % 2 == 0)
+              ? [const Color(0xFFE65100), const Color(0xFFFF8F00)]
+              : [const Color(0xFF7C3AED), const Color(0xFF4F46E5)];
+
+          return InkWell(
+            onTap: () {
+              final rest = controller.allRestaurants.firstWhere(
+                (r) => r.id == offer.restaurantId,
+                orElse: () => controller.allRestaurants.first,
+              );
+              controller.setActiveRestaurant(rest);
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 5),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                    colors: gradientColors,
+                    begin: Alignment.topRight,
+                    end: Alignment.bottomLeft),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                      color: gradientColors.first.withOpacity(0.4),
+                      blurRadius: 12,
+                      offset: const Offset(0, 5))
+                ],
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.25),
+                              borderRadius: BorderRadius.circular(10)),
+                          child: Text(offer.discountTag,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(offer.title,
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(deal['title'] as String,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 2),
-                      Text(deal['desc'] as String,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 10.5)),
-                    ],
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 2),
+                        Text(offer.description,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 10.5),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
                   ),
-                ),
-                Icon(deal['icon'] as IconData,
-                    color: Colors.white.withOpacity(0.85), size: 42),
-              ],
+                  const SizedBox(width: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: CustomAppImage(
+                      imageUrl: offer.imageUrl,
+                      width: 70,
+                      height: 70,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -4776,6 +4996,10 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           // ─── بطاقة حالة المطعم (مفتوح / مغلق) ───
           _buildRestaurantStatusCard(context, controller),
           const SizedBox(height: 16),
+          _buildRestaurantLocationCard(context, controller),
+          const SizedBox(height: 16),
+          _buildOwnerOffersCard(context, controller),
+          const SizedBox(height: 16),
           _buildVendorAnalyticsCard(context, controller, controller.userRestaurantId ?? 'akkala'),
           const SizedBox(height: 18),
           // ─── عرض مطعم صاحبه فقط حسب الـ ID ───
@@ -4932,6 +5156,268 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// بطاقة إلقاط وتحديث موقع المطعم الإحداثي (GPS)
+  Widget _buildRestaurantLocationCard(
+      BuildContext context, JeebliController controller) {
+    final restId = controller.userRestaurantId ?? '';
+    final rest = controller.allRestaurants.firstWhere(
+      (r) => r.id == restId,
+      orElse: () => controller.allRestaurants.first,
+    );
+    final hasLoc = rest.restaurantLat != null && rest.restaurantLng != null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.amber.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.location_on_rounded, color: Colors.amber, size: 24),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('موقع المطعم الجغرافي (GPS) 📍',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('تحديد الموقع بدقة يظهر مطعمك للزبائن القريبين أولاً',
+                        style: TextStyle(color: Colors.white60, fontSize: 11)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (hasLoc)
+            Text('الإحداثيات الحالية: ${rest.restaurantLat!.toStringAsFixed(4)}, ${rest.restaurantLng!.toStringAsFixed(4)}',
+                style: const TextStyle(color: Colors.greenAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final success = await controller.detectLocation();
+                if (success && controller.customerLat != null && controller.customerLng != null) {
+                  controller.updateRestaurantLocation(rest.id, controller.customerLat!, controller.customerLng!);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('✅ تم حفظ موقع المطعم الجغرافي بنجاح!'),
+                      backgroundColor: Colors.green,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('⚠️ تعذر التقاط الموقع، تأكد من تفعيل الـ GPS بالجهاز'),
+                      backgroundColor: Colors.orange,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.my_location_rounded, color: Colors.white, size: 18),
+              label: Text(hasLoc ? 'تحديث موقع المطعم الحقيقي (GPS)' : 'التقاط موقع المطعم الحالي (GPS)',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// بطاقة إدارة عروض وتخفيضات المطعم
+  Widget _buildOwnerOffersCard(
+      BuildContext context, JeebliController controller) {
+    final restId = controller.userRestaurantId ?? '';
+    final myOffers = controller.allOffers.where((o) => o.restaurantId == restId).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.purpleAccent.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.local_offer_rounded, color: Colors.purpleAccent, size: 24),
+                  SizedBox(width: 10),
+                  Text('عروض وتخفيضات المطعم 🎁',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                ],
+              ),
+              ElevatedButton.icon(
+                onPressed: () => _showAddOfferDialog(context, controller, restId),
+                icon: const Icon(Icons.add, size: 16, color: Colors.white),
+                label: const Text('إضافة عرض', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purpleAccent,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (myOffers.isEmpty)
+            const Text('لا توجد عروض نشطة حالياً. أضف عرضك ليظهر للزبائن في أعلى التطبيق!',
+                style: TextStyle(color: Colors.white54, fontSize: 11))
+          else
+            Column(
+              children: myOffers.map((offer) {
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: CustomAppImage(imageUrl: offer.imageUrl, width: 44, height: 44, fit: BoxFit.cover),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(offer.title, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                            Text(offer.discountTag, style: const TextStyle(color: Colors.amber, fontSize: 10)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(offer.isActive ? Icons.visibility : Icons.visibility_off,
+                            color: offer.isActive ? Colors.greenAccent : Colors.grey, size: 20),
+                        onPressed: () => controller.toggleOfferActive(offer.id),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                        onPressed: () => controller.deleteOffer(offer.id),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddOfferDialog(BuildContext context, JeebliController controller, String restId) {
+    final titleC = TextEditingController();
+    final descC = TextEditingController();
+    final tagC = TextEditingController(text: 'عرض خاص 🔥');
+    final imgC = TextEditingController();
+    final rest = controller.allRestaurants.firstWhere(
+      (r) => r.id == restId,
+      orElse: () => controller.allRestaurants.first,
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('إضافة عرض جديد 🎁', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleC,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(labelText: 'عنوان العرض (مثال: وجبة عائلية)', labelStyle: TextStyle(color: Colors.white70)),
+                ),
+                TextField(
+                  controller: descC,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(labelText: 'تفاصيل العرض', labelStyle: TextStyle(color: Colors.white70)),
+                ),
+                TextField(
+                  controller: tagC,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(labelText: 'شارة العرض (مثل: خصم 20% / توفير)', labelStyle: TextStyle(color: Colors.white70)),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: imgC,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(labelText: 'رابط صورة العرض', labelStyle: TextStyle(color: Colors.white70)),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.photo_library, color: Colors.amber),
+                      onPressed: () async {
+                        final picker = ImagePicker();
+                        final picked = await picker.pickImage(source: ImageSource.gallery);
+                        if (picked != null) {
+                          imgC.text = picked.path;
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+            ElevatedButton(
+              onPressed: () {
+                if (titleC.text.trim().isEmpty) return;
+                final newOffer = Offer(
+                  id: 'off_${DateTime.now().millisecondsSinceEpoch}',
+                  restaurantId: restId,
+                  restaurantName: rest.name,
+                  title: titleC.text.trim(),
+                  description: descC.text.trim(),
+                  discountTag: tagC.text.trim(),
+                  imageUrl: imgC.text.trim().isEmpty
+                      ? 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80'
+                      : imgC.text.trim(),
+                );
+                controller.addOffer(newOffer);
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('✅ تم نشر العرض بنجاح!'), backgroundColor: Colors.green, behavior: SnackBarBehavior.floating),
+                );
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.purpleAccent, foregroundColor: Colors.white),
+              child: const Text('نشر العرض 🚀', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -5799,22 +6285,28 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                           offset: const Offset(0, 6))
                     ],
                   ),
-                  child: Center(
-                    child: Text(
-                      name.isNotEmpty ? name[0] : '؟',
-                      style: const TextStyle(
-                          fontSize: 38,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white),
-                    ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(48),
+                    child: controller.customerAvatarUrl.isNotEmpty
+                        ? CustomAppImage(
+                            imageUrl: controller.customerAvatarUrl,
+                            width: 96,
+                            height: 96,
+                            fit: BoxFit.cover,
+                          )
+                        : Center(
+                            child: Text(
+                              name.isNotEmpty ? name[0] : '؟',
+                              style: const TextStyle(
+                                  fontSize: 38,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white),
+                            ),
+                          ),
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text(
-                              '📷 ميزة رفع الصورة ستُفعَّل قريباً'),
-                          behavior: SnackBarBehavior.floating)),
+                  onTap: () => _showPickAvatarModal(context, controller),
                   child: Container(
                     width: 28,
                     height: 28,
@@ -6425,6 +6917,71 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
           },
         ),
       ],
+  void _showPickAvatarModal(BuildContext context, JeebliController controller) {
+    final urlC = TextEditingController(text: controller.customerAvatarUrl);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: controller.cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('تغيير صورة الملف الشخصي 📷',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: controller.textColor)),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded, color: Color(0xFFFF8F00)),
+                title: Text('اختيار صورة من الاستوديو', style: TextStyle(color: controller.textColor)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final picker = ImagePicker();
+                  final picked = await picker.pickImage(source: ImageSource.gallery);
+                  if (picked != null) {
+                    controller.updateCustomerAvatar(picked.path);
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded, color: Color(0xFFFF8F00)),
+                title: Text('التقاط صورة بالكاميرا', style: TextStyle(color: controller.textColor)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final picker = ImagePicker();
+                  final picked = await picker.pickImage(source: ImageSource.camera);
+                  if (picked != null) {
+                    controller.updateCustomerAvatar(picked.path);
+                  }
+                },
+              ),
+              const Divider(),
+              TextField(
+                controller: urlC,
+                style: TextStyle(color: controller.textColor),
+                decoration: InputDecoration(
+                  labelText: 'أو أدخل رابط الصورة المباشر (URL)',
+                  labelStyle: TextStyle(color: controller.subtextColor),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.check_circle_rounded, color: Colors.green),
+                    onPressed: () {
+                      if (urlC.text.trim().isNotEmpty) {
+                        controller.updateCustomerAvatar(urlC.text.trim());
+                        Navigator.pop(ctx);
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
