@@ -586,6 +586,16 @@ class JeebliController extends ChangeNotifier {
         _saveLocalData();
         notifyListeners();
       }, onError: (e) => debugPrint('Firestore offers sync note: $e'));
+
+      // ═══ مزامنة إعدادات التطبيق (نظام النقاط) ═══
+      firestore.collection('app_settings').doc('loyalty').snapshots().listen((doc) {
+        if (doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          _loyaltySystemEnabled = data['enabled'] as bool? ?? false;
+          _adminPointsPerOrder = (data['pointsPerOrder'] as int?) ?? 10;
+          notifyListeners();
+        }
+      }, onError: (e) => debugPrint('Firestore app_settings sync note: $e'));
     } catch (e) {
       debugPrint('Firestore sync init note: $e');
     }
@@ -780,6 +790,26 @@ class JeebliController extends ChangeNotifier {
         reason: '🎁 هدية ترحيبية بمناسبة تسجيلك',
         date: DateTime.now().subtract(const Duration(days: 2))),
   ];
+
+  // نظام النقاط يُتحكم به من السوبر أدمن
+  bool _loyaltySystemEnabled = false; // مُعطَّل افتراضياً حتى يُفعّله السوبر أدمن
+  int _adminPointsPerOrder = 10; // نقاط لكل 1000 دينار (يتحكم به السوبر أدمن)
+
+  bool get loyaltySystemEnabled => _loyaltySystemEnabled;
+  int get adminPointsPerOrder => _adminPointsPerOrder;
+
+  void setLoyaltySystem({bool? enabled, int? pointsPerOrder}) {
+    if (enabled != null) _loyaltySystemEnabled = enabled;
+    if (pointsPerOrder != null) _adminPointsPerOrder = pointsPerOrder;
+    notifyListeners();
+    // حفظ في Firestore لمزامنة الإعداد على جميع الأجهزة
+    try {
+      FirebaseFirestore.instance.collection('app_settings').doc('loyalty').set({
+        'enabled': _loyaltySystemEnabled,
+        'pointsPerOrder': _adminPointsPerOrder,
+      });
+    } catch (_) {}
+  }
 
   int get loyaltyPoints => _loyaltyPoints;
   bool get redeemingPoints => _redeemingPoints;
@@ -3420,9 +3450,10 @@ class CartScreen extends StatelessWidget {
                       fontWeight: FontWeight.bold, color: Colors.greenAccent)),
             ]),
           ],
-          const SizedBox(height: 10),
-          // ── كارت استبدال النقاط ──
-          GestureDetector(
+          if (controller.loyaltySystemEnabled) ...[
+            const SizedBox(height: 10),
+            // ── كارت استبدال النقاط ──
+            GestureDetector(
             onTap: () => controller.toggleRedeemPoints(),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -3483,7 +3514,7 @@ class CartScreen extends StatelessWidget {
               ),
             ),
           ),
-          const Divider(height: 20, color: Colors.white12),
+        ],
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             const Text('المبلغ الكلي',
                 style: TextStyle(
@@ -3708,39 +3739,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              _sectionTitle('💳 طريقة الدفع'),
+              _sectionTitle('💵 طريقة الدفع'),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                      child: _paymentOption(
-                    icon: Icons.delivery_dining,
-                    label: 'كاش عند الاستلام',
-                    subtitle: 'ادفع لحظة وصول المندوب',
-                    isSelected:
-                        controller.paymentMethod == PaymentMethod.cod,
-                    onTap: () => setState(() {
-                      controller.paymentMethod = PaymentMethod.cod;
-                    }),
-                  )),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: _paymentOption(
-                    icon: Icons.credit_card,
-                    label: 'ماستركارد',
-                    subtitle: 'بطاقة ائتمانية آمنة',
-                    isSelected: controller.paymentMethod ==
-                        PaymentMethod.mastercard,
-                    onTap: () => setState(() {
-                      controller.paymentMethod = PaymentMethod.mastercard;
-                    }),
-                  )),
-                ],
+              // كاش عند الاستلام فقط
+              _paymentOption(
+                icon: Icons.payments_rounded,
+                label: 'كاش عند الاستلام',
+                subtitle: 'ادفع لحظة وصول المندوب',
+                isSelected: true,
+                onTap: () {},
               ),
-              if (controller.paymentMethod == PaymentMethod.mastercard) ...[
-                const SizedBox(height: 14),
-                _buildMastercardForm(controller),
-              ],
               const SizedBox(height: 20),
               _buildSecurityBadge(),
               const SizedBox(height: 20),
@@ -3752,18 +3760,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 child: ElevatedButton.icon(
                   onPressed: () async {
                     if (!_formKey.currentState!.validate()) return;
-                    if (controller.paymentMethod == PaymentMethod.mastercard) {
-                      if (controller.cardNumber.length < 16 ||
-                          controller.cardExpiry.isEmpty ||
-                          controller.cardCvv.length < 3) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'يرجى إدخال بيانات البطاقة الصحيحة'),
-                                behavior: SnackBarBehavior.floating));
-                        return;
-                      }
-                    }
                     final success =
                         await controller.confirmOrder(context);
                     if (!context.mounted) return;
@@ -3883,6 +3879,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildMastercardForm(JeebliController controller) {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -6400,9 +6397,11 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                         ? location.split('(').first.trim()
                         : location.split(' ').first,
                     Icons.location_city_outlined),
-                const SizedBox(width: 12),
-                _buildStatCard(context, 'نقطة 🌟', controller.loyaltyPoints.toString(),
-                    Icons.stars_rounded),
+                if (controller.loyaltySystemEnabled) ...[
+                  const SizedBox(width: 12),
+                  _buildStatCard(context, 'نقطة 🌟', controller.loyaltyPoints.toString(),
+                      Icons.stars_rounded),
+                ],
               ],
             ),
             const SizedBox(height: 20),
@@ -6440,8 +6439,8 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            _buildLoyaltyCard(controller),
-            const SizedBox(height: 16),
+            if (controller.loyaltySystemEnabled) _buildLoyaltyCard(controller),
+            if (controller.loyaltySystemEnabled) const SizedBox(height: 16),
             _buildOrderHistorySection(context, controller),
             const SizedBox(height: 20),
             Container(

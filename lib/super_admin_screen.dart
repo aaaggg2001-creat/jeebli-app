@@ -26,7 +26,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -78,10 +78,12 @@ class _SuperAdminScreenState extends State<SuperAdminScreen>
           indicatorColor: Colors.amber,
           labelColor: Colors.amber,
           unselectedLabelColor: Colors.grey[500],
+          isScrollable: true,
           tabs: const [
             Tab(icon: Icon(Icons.store_rounded, size: 18), text: 'المطاعم'),
             Tab(icon: Icon(Icons.fastfood_rounded, size: 18), text: 'الوجبات'),
             Tab(icon: Icon(Icons.notifications_rounded, size: 18), text: 'الإشعارات'),
+            Tab(icon: Icon(Icons.settings_rounded, size: 18), text: 'الإعدادات'),
           ],
         ),
       ),
@@ -91,6 +93,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen>
           _RestaurantsTab(controller: controller),
           _ProductsTab(controller: controller),
           _NotificationsTab(controller: controller),
+          _SettingsTab(controller: controller),
         ],
       ),
     );
@@ -973,6 +976,257 @@ class _NotificationsTab extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ============================================================================
+// تبويب الإعدادات — التحكم بنظام النقاط وإعدادات التطبيق
+// ============================================================================
+class _SettingsTab extends StatefulWidget {
+  final JeebliController controller;
+  const _SettingsTab({required this.controller});
+
+  @override
+  State<_SettingsTab> createState() => _SettingsTabState();
+}
+
+class _SettingsTabState extends State<_SettingsTab> {
+  late TextEditingController _pointsCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _pointsCtrl = TextEditingController(
+        text: widget.controller.adminPointsPerOrder.toString());
+  }
+
+  @override
+  void dispose() {
+    _pointsCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = widget.controller;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // ── إعدادات نظام النقاط ──
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.amber.withOpacity(0.2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.stars_rounded, color: Colors.amber, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('نظام نقاط الولاء 🌟',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white)),
+                        Text('تحكم بتفعيل النقاط وعدد النقاط لكل طلب',
+                            style: TextStyle(fontSize: 11, color: Colors.white54)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // مفتاح التفعيل
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: ctrl.loyaltySystemEnabled
+                      ? const Color(0xFF10B981).withOpacity(0.1)
+                      : Colors.white.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: ctrl.loyaltySystemEnabled
+                        ? const Color(0xFF10B981).withOpacity(0.4)
+                        : Colors.white12,
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          ctrl.loyaltySystemEnabled
+                              ? '✅ نظام النقاط مُفعَّل'
+                              : '⏸ نظام النقاط مُعطَّل',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: ctrl.loyaltySystemEnabled
+                                ? const Color(0xFF10B981)
+                                : Colors.white70,
+                          ),
+                        ),
+                        Text(
+                          ctrl.loyaltySystemEnabled
+                              ? 'الزبائن يكسبون نقاطاً على كل طلب'
+                              : 'النقاط مخفية عن الزبائن حالياً',
+                          style: const TextStyle(fontSize: 10, color: Colors.white38),
+                        ),
+                      ],
+                    ),
+                    Switch(
+                      value: ctrl.loyaltySystemEnabled,
+                      onChanged: (val) {
+                        ctrl.setLoyaltySystem(enabled: val);
+                        setState(() {});
+                      },
+                      activeColor: const Color(0xFF10B981),
+                    ),
+                  ],
+                ),
+              ),
+              if (ctrl.loyaltySystemEnabled) ...[
+                const SizedBox(height: 14),
+                const Text('🎯 عدد النقاط لكل 1,000 د.ع طلب:',
+                    style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _pointsCtrl,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.05),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none,
+                          ),
+                          hintText: 'مثال: 10',
+                          hintStyle: const TextStyle(color: Colors.white30),
+                          suffixText: 'نقطة',
+                          suffixStyle: const TextStyle(color: Colors.amber),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      onPressed: () {
+                        final pts = int.tryParse(_pointsCtrl.text.trim());
+                        if (pts != null && pts > 0) {
+                          ctrl.setLoyaltySystem(pointsPerOrder: pts);
+                          setState(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('✅ تم تحديث النقاط: $pts نقطة لكل 1,000 د.ع'),
+                              backgroundColor: Colors.green,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber, foregroundColor: Colors.black),
+                      child: const Text('حفظ', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline_rounded, color: Colors.amber, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'الحالي: كل 1,000 د.ع = ${ctrl.adminPointsPerOrder} نقطة • 250 نقطة = خصم 1,500 د.ع',
+                          style: const TextStyle(fontSize: 11, color: Colors.amber),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        // ── إعدادات عامة ──
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.tune_rounded, color: Colors.blueAccent, size: 20),
+                  SizedBox(width: 8),
+                  Text('إعدادات عامة للتطبيق',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.purpleAccent.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.store_rounded, color: Colors.purpleAccent, size: 18),
+                ),
+                title: const Text('المطاعم النشطة',
+                    style: TextStyle(fontSize: 12, color: Colors.white70)),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.purpleAccent.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${ctrl.allRestaurants.where((r) => r.isActive).length} / ${ctrl.allRestaurants.length}',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.bold, color: Colors.purpleAccent),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
