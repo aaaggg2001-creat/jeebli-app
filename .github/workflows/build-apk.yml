@@ -3,6 +3,7 @@ name: Build and Release APK
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,7 +25,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.0'
+          flutter-version: '3.44.6'
           channel: 'stable'
 
       - name: Get dependencies
@@ -37,20 +38,19 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: latest
-          name: "Jeebli App - آخر إصدار"
+          name: "Jeebli App - آخر إصدار 🛵"
           body: |
-            ## 📦 أحدث نسخة من تطبيق جيبلي 🛵
-            
+            ## 📦 أحدث نسخة من تطبيق جيبلي
+
             ### كيفية التثبيت:
             1. قم بتحميل ملف `Jeebli-App.apk` أدناه
             2. افتح الملف على هاتفك الأندرويد
             3. اضغط "تثبيت" وامنح الأذونات المطلوبة
-            
-            > آخر تحديث: ${{ github.event.head_commit.message }}
+
+            > 📝 آخر تحديث: ${{ github.event.head_commit.message }}
           artifacts: "build/app/outputs/flutter-apk/app-release.apk"
           artifactName: "Jeebli-App.apk"
           allowUpdates: true
           makeLatest: true
           removeArtifacts: true
           token: ${{ secrets.GITHUB_TOKEN }}
-
