@@ -8,13 +8,142 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'super_admin_screen.dart';
+
+/// ─── FCM Background Handler (يجب أن يكون Top-level function) ───────────────
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  debugPrint('📩 إشعار في الخلفية: ${message.notification?.title}');
+}
+
+/// ─── خدمة الإشعارات المحلية والسحابية ──────────────────────────────────────
+class JeebliNotificationService {
+  static final JeebliNotificationService _instance =
+      JeebliNotificationService._internal();
+  factory JeebliNotificationService() => _instance;
+  JeebliNotificationService._internal();
+
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
+  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+
+  /// قناة الإشعارات لأندرويد
+  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+    'jeebli_orders_channel',
+    'إشعارات الطلبات',
+    description: 'إشعارات حالة الطلبات والعروض من جيبلي',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+  );
+
+  Future<void> initialize() async {
+    // ── طلب إذن الإشعارات ─────────────────────────────────────────
+    final settings = await _fcm.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+      provisional: false,
+    );
+    debugPrint('🔔 صلاحية الإشعارات: ${settings.authorizationStatus}');
+
+    // ── تهيئة الإشعارات المحلية ───────────────────────────────────
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidInit);
+    await _localNotifications.initialize(
+      settings: initSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse res) {
+        debugPrint('تم النقر على الإشعار: ${res.payload}');
+      },
+    );
+
+    // إنشاء قناة الأندرويد
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(_channel);
+
+    // ── الاستماع للرسائل أثناء عمل التطبيق (Foreground) ─────────
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      final notification = message.notification;
+      final android = message.notification?.android;
+      if (notification != null && android != null) {
+        _showLocalNotification(
+          title: notification.title ?? 'جيبلي 🛵',
+          body: notification.body ?? '',
+          payload: message.data['route'] ?? '',
+        );
+      }
+    });
+
+    // ── الاستماع عند النقر على الإشعار وفتح التطبيق (Background) ─
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('🔗 تم فتح الإشعار: ${message.data}');
+    });
+
+    // ── طباعة التوكن للاختبار ─────────────────────────────────────
+    try {
+      final token = await _fcm.getToken();
+      debugPrint('📱 FCM Token: $token');
+    } catch (e) {
+      debugPrint('FCM Token error: $e');
+    }
+  }
+
+  /// إرسال إشعار محلي يظهر فوراً
+  Future<void> _showLocalNotification({
+    required String title,
+    required String body,
+    String payload = '',
+    int id = 0,
+  }) async {
+    const androidDetails = AndroidNotificationDetails(
+      'jeebli_orders_channel',
+      'إشعارات الطلبات',
+      channelDescription: 'إشعارات حالة الطلبات والعروض من جيبلي',
+      importance: Importance.max,
+      priority: Priority.high,
+      icon: '@mipmap/ic_launcher',
+      playSound: true,
+      enableVibration: true,
+      styleInformation: BigTextStyleInformation(''),
+    );
+    const details = NotificationDetails(android: androidDetails);
+    await _localNotifications.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: details,
+      payload: payload,
+    );
+  }
+
+  /// إشعار محلي مباشر (للاستخدام من داخل التطبيق)
+  Future<void> showOrderNotification({
+    required String title,
+    required String body,
+    int id = 1,
+  }) async {
+    await _showLocalNotification(title: title, body: body, id: id);
+  }
+}
+
+/// ─── Instance عالمي للخدمة ──────────────────────────────────────────────────
+final jeebliNotifications = JeebliNotificationService();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── تسجيل Background handler قبل أي شيء ──────────────────────
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   try {
     await Firebase.initializeApp(
       options: const FirebaseOptions(
@@ -28,10 +157,63 @@ void main() async {
       persistenceEnabled: true,
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
+
+    // ── تهيئة نظام الإشعارات ──────────────────────────────────────
+    await jeebliNotifications.initialize();
   } catch (e) {
     debugPrint('Firebase init note: $e');
   }
   runApp(const MyApp());
+}
+
+
+/// زر رجوع أنيق ومميز وسهل اللمس والتفاعل
+class JeebliBackButton extends StatelessWidget {
+  final VoidCallback? onPressed;
+  final Color? iconColor;
+  final Color? backgroundColor;
+
+  const JeebliBackButton({
+    super.key,
+    this.onPressed,
+    this.iconColor,
+    this.backgroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Material(
+        color: backgroundColor ?? Colors.white.withOpacity(0.12),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            SystemSound.play(SystemSoundType.click);
+            if (onPressed != null) {
+              onPressed!();
+            } else {
+              Navigator.maybePop(context);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.2),
+            ),
+            child: Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: iconColor ?? Colors.amber,
+              size: 18,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// ============================================================================
@@ -246,7 +428,7 @@ class CartItem {
   final Product product;
   int quantity;
   CartItem({required this.product, this.quantity = 1});
-  double get totalPrice => product.price * quantity;
+  double get totalPrice => (product.discountPrice ?? product.price) * quantity;
 }
 
 class Category {
@@ -390,15 +572,40 @@ class SecurityEngine {
 /// ============================================================================
 
 enum OrderStatus { idle, confirmed, preparing, onWay, arrived, rated }
+
+/// حالات الطلب في Firestore (تُخزَّن كـ string)
+/// pending → accepted/preparing → onTheWay → delivered → rejected
 enum PaymentMethod { cod, mastercard }
 
 class JeebliController extends ChangeNotifier {
+  bool _isOffline = false;
+  bool get isOffline => _isOffline;
+  
+  StreamSubscription? _connectivitySubscription;
 
   JeebliController() {
+    _initConnectivity();
     _loadLocalData().then((_) {
       _initFirebaseSync();
       _loadSavedSession();
     });
+  }
+
+  void _initConnectivity() {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      bool isConnected = results.any((result) => result != ConnectivityResult.none);
+      if (_isOffline == isConnected) {
+        _isOffline = !isConnected;
+        notifyListeners();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _connectivitySubscription?.cancel();
+    _deliveryTimer?.cancel();
+    super.dispose();
   }
 
   void _loadSavedSession() async {
@@ -681,6 +888,7 @@ class JeebliController extends ChangeNotifier {
   String customerAvatarUrl = '';
   String streetDetails = '';
   String orderNotes = '';
+  String? activeOrderId; // معرّف الطلب النشط للزبون لمتابعته حياً
   bool isLocating = false;
   double? customerLat;
   double? customerLng;
@@ -1245,7 +1453,51 @@ class JeebliController extends ChangeNotifier {
       _cartItems.isEmpty ? null : _cartItems.first.product.restaurantId;
   int get cartCount => _cartItems.fold(0, (s, i) => s + i.quantity);
   double get subtotal => _cartItems.fold(0.0, (s, i) => s + i.totalPrice);
-  double get totalAmount => subtotal + deliveryFee - loyaltyDiscount;
+  
+  // --- Promo Code ---
+  final TextEditingController promoCodeController = TextEditingController();
+  String? _appliedPromoCode;
+  double _appliedPromoDiscount = 0.0;
+  String? get appliedPromoCode => _appliedPromoCode;
+  double get appliedPromoDiscount => _appliedPromoDiscount;
+
+  String applyPromoCode(String code) {
+    if (code.isEmpty) return 'يرجى إدخال كود الخصم';
+    if (_appliedPromoCode == code) return 'تم تطبيق هذا الكود مسبقاً';
+    
+    final offer = _offers.firstWhere((o) => o.promoCode == code && o.isActive, orElse: () => Offer(id: '', restaurantId: '', restaurantName: '', title: '', description: '', discountTag: '', imageUrl: ''));
+    
+    if (offer.id.isEmpty) return 'كود الخصم غير صحيح أو منتهي الصلاحية';
+    if (cartRestaurantId != null && offer.restaurantId.isNotEmpty && offer.restaurantId != cartRestaurantId) {
+      return 'كود الخصم هذا غير صالح للمطعم الحالي';
+    }
+
+    double discount = 0.0;
+    if (offer.discountTag.contains('%')) {
+      final match = RegExp(r'\d+').firstMatch(offer.discountTag);
+      if (match != null) {
+        final percent = double.parse(match.group(0)!);
+        discount = subtotal * (percent / 100);
+      }
+    } else if (offer.discountTag.contains('مجاني')) {
+      discount = deliveryFee;
+    } else {
+      discount = 2000.0; // خصم افتراضي
+    }
+
+    _appliedPromoCode = code;
+    _appliedPromoDiscount = discount;
+    notifyListeners();
+    return 'تم تطبيق الخصم بنجاح!';
+  }
+
+  void removePromoCode() {
+    _appliedPromoCode = null;
+    _appliedPromoDiscount = 0.0;
+    notifyListeners();
+  }
+
+  double get totalAmount => (subtotal + deliveryFee - loyaltyDiscount - appliedPromoDiscount).clamp(0.0, double.infinity);
 
   void addToCart(Product product, BuildContext context) {
     if (!product.isAvailable) return;
@@ -1321,6 +1573,8 @@ class JeebliController extends ChangeNotifier {
 
   void clearCart() {
     _cartItems.clear();
+    _appliedPromoCode = null;
+    _appliedPromoDiscount = 0.0;
     notifyListeners();
   }
 
@@ -1467,6 +1721,40 @@ $itemsText
     // Save customer name and phone in session for future orders
     saveSession();
 
+    // 📦 حفظ الطلب في Firestore تحت collection 'orders'
+    try {
+      final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
+      await FirebaseFirestore.instance.collection('orders').doc(orderId).set({
+        'orderId': orderId,
+        'customerName': customerName,
+        'customerPhone': customerPhone,
+        'restaurantId': cartRestaurantId ?? '',
+        'restaurantName': _activeRestaurant?.name ?? '',
+        'items': _cartItems
+            .map((i) => {
+                  'name': i.product.name,
+                  'qty': i.quantity,
+                  'price': i.totalPrice,
+                })
+            .toList(),
+        'subtotal': subtotal,
+        'deliveryFee': deliveryFee,
+        'totalAmount': totalAmount,
+        'promoCode': appliedPromoCode ?? '',
+        'promoDiscount': appliedPromoDiscount,
+        'neighborhood': selectedNeighborhood,
+        'streetDetails': streetDetails,
+        'status': 'pending',
+        'driverName': '',
+        'driverPhone': '',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      activeOrderId = orderId; // حفظ المعرّف لمتابعة الطلب حياً
+      debugPrint('✅ تم حفظ الطلب في Firestore: $orderId');
+    } catch (e) {
+      debugPrint('❌ خطأ في حفظ الطلب: $e');
+    }
+
     return true;
   }
 
@@ -1502,12 +1790,22 @@ $itemsText
     }
     _redeemingPoints = false;
     _orderStatus = OrderStatus.confirmed;
+
+    // 🔔 إشعار لحظي للزبون عند تأكيد الطلب
+    jeebliNotifications.showOrderNotification(
+      title: '✅ تم إرسال طلبك بنجاح!',
+      body:
+          'طلبك من ${_activeRestaurant?.name ?? 'المطعم'} قيد المعالجة 🛵 المبلغ: ${totalAmount.toStringAsFixed(0)} د.ع',
+      id: 1001,
+    );
+
     clearCart();
     _activeRestaurant = null;
     _currentTab = 0;
     playFeedbackSound();
     notifyListeners();
   }
+
 
   // ignore: unused_element
   void _startDeliverySimulation(BuildContext context) {
@@ -1658,6 +1956,25 @@ $itemsText
       } catch (e) {
         debugPrint('Admin credentials login error: $e');
       }
+
+      // فحص المندوبين من Firestore
+      try {
+        final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(idNormalized).get();
+        if (driverDoc.exists && driverDoc.data()?['password'] == password) {
+          final dData = driverDoc.data()!;
+          _isLoggedIn = true;
+          _userRole = 'driver';
+          _userEmailOrPhone = idNormalized;
+          customerName = dData['name'] ?? 'المندوب';
+          customerPhone = idNormalized;
+          saveSession();
+          _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
+          notifyListeners();
+          return true;
+        }
+      } catch (e) {
+        debugPrint('Driver login error: $e');
+      }
     }
 
     return false;
@@ -1702,23 +2019,85 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return JeebliProvider(
       notifier: JeebliController(),
-      child: MaterialApp(
-        title: 'جيب لي ديلفري',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFE65100),
-            primary: const Color(0xFFE65100),
-            secondary: const Color(0xFFFFB300),
-            surface: const Color(0xFFFFFDF9),
-          ),
-          fontFamily: 'Cairo',
-        ),
-        home: const Directionality(
-          textDirection: TextDirection.rtl,
-          child: SplashScreen(),
-        ),
+      child: Builder(
+        builder: (context) {
+          return MaterialApp(
+            title: 'جيب لي ديلفري',
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(
+              useMaterial3: true,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: const Color(0xFFE65100),
+                primary: const Color(0xFFE65100),
+                secondary: const Color(0xFFFFB300),
+                surface: const Color(0xFFFFFDF9),
+              ),
+              fontFamily: 'Cairo',
+            ),
+            builder: (context, child) {
+              final controller = JeebliProvider.of(context);
+              return Directionality(
+                textDirection: TextDirection.rtl,
+                child: Stack(
+                  children: [
+                    ?child,
+                    if (controller.isOffline)
+                      Positioned.fill(
+                        child: Container(
+                          color: Colors.black87,
+                          child: Center(
+                            child: Material(
+                              color: Colors.transparent,
+                              child: Container(
+                                padding: const EdgeInsets.all(24),
+                                margin: const EdgeInsets.symmetric(horizontal: 32),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1E293B),
+                                  borderRadius: BorderRadius.circular(24),
+                                  border: Border.all(color: Colors.redAccent.withOpacity(0.5), width: 2),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.red.withOpacity(0.2),
+                                      blurRadius: 20,
+                                      spreadRadius: 5,
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.wifi_off_rounded, color: Colors.redAccent, size: 64),
+                                    const SizedBox(height: 16),
+                                    const Text(
+                                      'لا يوجد اتصال بالإنترنت',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'لا يمكن الطلب بسبب عدم الاتصال بالإنترنت.\nيرجى التحقق من اتصالك والمحاولة مجدداً.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 13,
+                                          height: 1.5),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+            home: const SplashScreen(),
+          );
+        }
       ),
     );
   }
@@ -2113,6 +2492,10 @@ class AppRouteNavigator extends StatelessWidget {
       return const RestaurantOwnerAdminScreen();
     }
 
+    if (controller.userRole == 'driver') {
+      return const DriverDashboardScreen();
+    }
+
     // الزبائن يدخلون مباشرة إلى التصفح والرئيسية بدون شاشة تسجيل الدخول
     return const MainNavigationShell();
   }
@@ -2240,6 +2623,83 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
     super.dispose();
   }
 
+  String _selectedCategory = 'الكل';
+  final List<Map<String, dynamic>> _categories = [
+    {'name': 'الكل', 'icon': Icons.apps_rounded, 'keywords': <String>[]},
+    {'name': 'وجبات سريعة', 'icon': Icons.fastfood_rounded, 'keywords': ['برجر', 'بيتزا', 'فنجر', 'وجبات', 'سريعة']},
+    {'name': 'مشويات', 'icon': Icons.kebab_dining_rounded, 'keywords': ['كباب', 'مشويات', 'تكة', 'شقف']},
+    {'name': 'أسماك', 'icon': Icons.set_meal_rounded, 'keywords': ['سمك', 'مسكوف', 'أسماك', 'بحرية']},
+    {'name': 'دجاج وشاورما', 'icon': Icons.local_fire_department_rounded, 'keywords': ['دجاج', 'شاورما', 'قص', 'زنجر', 'دياي']},
+    {'name': 'فلافل', 'icon': Icons.breakfast_dining_rounded, 'keywords': ['فلافل', 'مقبلات']},
+    {'name': 'حلويات وعصائر', 'icon': Icons.icecream_rounded, 'keywords': ['حلويات', 'عصير', 'عصائر', 'كيك', 'مرطبات', 'كريب', 'وافل']},
+  ];
+
+  bool _matchesCategory(Restaurant r, String categoryName) {
+    if (categoryName == 'الكل') return true;
+    final cat = _categories.firstWhere((c) => c['name'] == categoryName);
+    final List<String> keywords = cat['keywords'];
+    final combinedText = '${r.name} ${r.cuisine} ${r.description}'.toLowerCase();
+    for (String kw in keywords) {
+      if (combinedText.contains(kw)) return true;
+    }
+    return false;
+  }
+
+  Widget _buildCategoriesList(JeebliController controller) {
+    return SizedBox(
+      height: 45,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _categories.length,
+        itemBuilder: (context, index) {
+          final cat = _categories[index];
+          final isSelected = _selectedCategory == cat['name'];
+          return Padding(
+            padding: const EdgeInsets.only(left: 8.0),
+            child: InkWell(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                SystemSound.play(SystemSoundType.click);
+                setState(() => _selectedCategory = cat['name'] as String);
+              },
+              borderRadius: BorderRadius.circular(25),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected ? Colors.amber : (controller.isDarkMode ? Colors.white10 : Colors.grey[200]),
+                  borderRadius: BorderRadius.circular(25),
+                  border: Border.all(
+                    color: isSelected ? Colors.amberAccent : Colors.transparent,
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      cat['icon'] as IconData,
+                      size: 18,
+                      color: isSelected ? Colors.black87 : controller.subtextColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      cat['name'] as String,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? Colors.black87 : controller.textColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = JeebliProvider.of(context);
@@ -2263,14 +2723,14 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
           }
         }
 
-        final filteredRestaurants = _searchQuery.isEmpty
-            ? liveRestaurants
-            : liveRestaurants
-                .where((r) =>
-                    r.name.contains(_searchQuery) ||
-                    r.cuisine.contains(_searchQuery) ||
-                    r.description.contains(_searchQuery))
-                .toList();
+        final filteredRestaurants = liveRestaurants.where((r) {
+          final matchesSearch = _searchQuery.isEmpty ||
+              r.name.contains(_searchQuery) ||
+              r.cuisine.contains(_searchQuery) ||
+              r.description.contains(_searchQuery);
+          final matchesCat = _matchesCategory(r, _selectedCategory);
+          return matchesSearch && matchesCat;
+        }).toList();
 
         return SafeArea(
           child: CustomScrollView(
@@ -2402,6 +2862,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
+                  _buildCategoriesList(controller),
+                  const SizedBox(height: 16),
                   if (_searchQuery.isEmpty) _buildPromoSlider(context),
                   if (_searchQuery.isEmpty) const SizedBox(height: 16),
                   if (_searchQuery.isNotEmpty && filteredRestaurants.isEmpty)
@@ -2416,6 +2878,30 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                               'لا توجد نتائج لـ "$_searchQuery"',
                               style: const TextStyle(
                                   color: Colors.white54, fontSize: 14),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_searchQuery.isEmpty && filteredRestaurants.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 60),
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.storefront_rounded,
+                                size: 80,
+                                color: controller.subtextColor.withOpacity(0.3)),
+                            const SizedBox(height: 16),
+                            Text(
+                              'لا يوجد مطاعم أو محلات الآن،\nسوف يتم إضافة المطاعم في وقت لاحق',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: controller.subtextColor,
+                                fontSize: 14,
+                                height: 1.5,
+                              ),
                             ),
                           ],
                         ),
@@ -2684,6 +3170,19 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                         fontSize: 12,
                                         color: Colors.white70,
                                         height: 1.5)),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.access_time_rounded,
+                                        color: Colors.amber, size: 14),
+                                    const SizedBox(width: 4),
+                                    Text('ساعات العمل: ${rest.workingHoursLabel}',
+                                        style: const TextStyle(
+                                            color: Colors.amber,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
                                 const Padding(
                                   padding:
                                       EdgeInsets.symmetric(vertical: 12),
@@ -2873,35 +3372,513 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
   }
 
   Widget _buildActiveOrderBanner(JeebliController controller) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-            colors: [Color(0xFFE65100), Color(0xFFFFB300)],
-            begin: Alignment.topRight,
-            end: Alignment.bottomLeft),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.check_circle_rounded, color: Colors.white, size: 28),
-          SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('✅ تم إرسال طلبك للمطعم عبر الواتساب',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13)),
-                Text('سيتواصل معك المطعم للتأكيد قريباً',
-                    style: TextStyle(color: Colors.white70, fontSize: 11)),
-              ],
+    final orderId = controller.activeOrderId;
+    if (orderId == null) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              colors: [Color(0xFFE65100), Color(0xFFFFB300)],
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('✅ تم إرسال طلبك للمطعم',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text('سيتواصل معك المطعم للتأكيد قريباً',
+                      style: TextStyle(color: Colors.white70, fontSize: 11)),
+                ],
+              ),
             ),
+          ],
+        ),
+      );
+    }
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('orders').doc(orderId).snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+        final status = data['status'] ?? 'pending';
+        final driverName = data['driverName'] ?? '';
+        final driverPhone = data['driverPhone'] ?? '';
+
+        // مراحل التقدم
+        final steps = ['pending', 'preparing', 'onTheWay', 'delivered'];
+        final stepIndex = steps.indexOf(status);
+
+        final List<Map<String, dynamic>> stepsInfo = [
+          {'label': 'تم الإرسال', 'icon': Icons.receipt_long_rounded},
+          {'label': 'قيد التحضير', 'icon': Icons.restaurant_rounded},
+          {'label': 'في الطريق', 'icon': Icons.delivery_dining_rounded},
+          {'label': 'تم التسليم', 'icon': Icons.home_rounded},
+        ];
+
+        Color headerColor;
+        String headerTitle;
+        String headerSub;
+        IconData headerIcon;
+        switch (status) {
+          case 'preparing':
+            headerColor = Colors.amber;
+            headerTitle = '👨‍🍳 طلبك قيد التحضير';
+            headerSub = 'المطعم يحضّر وجبتك الآن';
+            headerIcon = Icons.restaurant_rounded;
+            break;
+          case 'onTheWay':
+            headerColor = Colors.lightBlueAccent;
+            headerTitle = '🛵 المندوب في الطريق إليك!';
+            headerSub = driverName.isNotEmpty ? 'المندوب: $driverName' : 'وجبتك على الطريق';
+            headerIcon = Icons.delivery_dining_rounded;
+            break;
+          case 'delivered':
+            headerColor = Colors.greenAccent;
+            headerTitle = '✅ تم التسليم بنجاح!';
+            headerSub = 'ألف عافية، ونتمنى تستمتع بوجبتك 🎉';
+            headerIcon = Icons.check_circle_rounded;
+            break;
+          case 'rejected':
+            headerColor = Colors.redAccent;
+            headerTitle = '❌ تم رفض الطلب';
+            headerSub = 'نأسف، يمكنك المحاولة مع مطعم آخر';
+            headerIcon = Icons.cancel_rounded;
+            break;
+          default:
+            headerColor = const Color(0xFFFF8F00);
+            headerTitle = '⏳ بانتظار موافقة المطعم...';
+            headerSub = 'سيتم الرد عليك خلال دقائق';
+            headerIcon = Icons.hourglass_top_rounded;
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: headerColor.withOpacity(0.4), width: 1.5),
+            boxShadow: [
+              BoxShadow(color: headerColor.withOpacity(0.12), blurRadius: 16, offset: const Offset(0, 6)),
+            ],
+          ),
+          child: Column(
+            children: [
+              // ─── Header ───
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [headerColor.withOpacity(0.15), Colors.transparent],
+                    begin: Alignment.topRight, end: Alignment.bottomLeft,
+                  ),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: headerColor.withOpacity(0.15),
+                        border: Border.all(color: headerColor.withOpacity(0.5)),
+                      ),
+                      child: Icon(headerIcon, color: headerColor, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(headerTitle, style: TextStyle(color: headerColor, fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text(headerSub, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                      ],
+                    )),
+                  ],
+                ),
+              ),
+              // ─── شريط التقدم ───
+              if (status != 'rejected')
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: List.generate(stepsInfo.length, (i) {
+                      final isActive = i <= stepIndex;
+                      final isCurrent = i == stepIndex;
+                      return Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 400),
+                                    width: isCurrent ? 40 : 32,
+                                    height: isCurrent ? 40 : 32,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isActive ? headerColor.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+                                      border: Border.all(
+                                        color: isActive ? headerColor : Colors.white12,
+                                        width: isCurrent ? 2.5 : 1.5,
+                                      ),
+                                    ),
+                                    child: Icon(
+                                      stepsInfo[i]['icon'] as IconData,
+                                      size: isCurrent ? 20 : 15,
+                                      color: isActive ? headerColor : Colors.white24,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    stepsInfo[i]['label'] as String,
+                                    style: TextStyle(fontSize: 8.5, color: isActive ? headerColor : Colors.white24),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (i < stepsInfo.length - 1)
+                              Expanded(
+                                child: Container(
+                                  height: 2,
+                                  margin: const EdgeInsets.only(bottom: 18),
+                                  color: i < stepIndex ? headerColor.withOpacity(0.5) : Colors.white12,
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              // ─── بطاقة المندوب (تظهر فقط إذا كان في الطريق) ───
+              if (status == 'onTheWay' && driverName.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.lightBlueAccent.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.lightBlueAccent.withOpacity(0.15),
+                        ),
+                        child: const Icon(Icons.person_pin_circle_rounded, color: Colors.lightBlueAccent, size: 24),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('🛵 المندوب', style: TextStyle(color: Colors.white54, fontSize: 10)),
+                            Text(driverName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                      if (driverPhone.isNotEmpty)
+                        GestureDetector(
+                          onTap: () async {
+                            final uri = Uri.parse('tel:$driverPhone');
+                            if (await canLaunchUrl(uri)) launchUrl(uri);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.lightBlueAccent.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.5)),
+                            ),
+                            child: const Row(children: [
+                              Icon(Icons.call_rounded, color: Colors.lightBlueAccent, size: 16),
+                              SizedBox(width: 4),
+                              Text('اتصال', style: TextStyle(color: Colors.lightBlueAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                            ]),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 4),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// ============================================================================
+/// واجهة المندوب (Driver Dashboard)
+/// ============================================================================
+
+class DriverDashboardScreen extends StatelessWidget {
+  const DriverDashboardScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = JeebliProvider.of(context);
+    final driverPhone = controller.customerPhone;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E293B),
+        elevation: 0,
+        centerTitle: true,
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.delivery_dining_rounded, color: Color(0xFFFF8F00), size: 24),
+            SizedBox(width: 8),
+            Text('واجهة المندوب', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout_rounded, color: Colors.white54),
+            onPressed: () => controller.logout(),
+            tooltip: 'تسجيل الخروج',
           ),
         ],
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('orders')
+            .where('driverPhone', isEqualTo: driverPhone)
+            .orderBy('createdAt', descending: true)
+            .limit(10)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: Color(0xFFFF8F00)));
+          }
+          final docs = snapshot.data?.docs ?? [];
+
+          if (docs.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF1E293B),
+                      border: Border.all(color: const Color(0xFFFF8F00).withOpacity(0.3)),
+                    ),
+                    child: const Icon(Icons.delivery_dining_rounded, color: Color(0xFFFF8F00), size: 56),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text('لا توجد طلبات مسندة إليك الآن', style: TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  const Text('ستظهر هنا الطلبات عند تعيينك من قبل المطعم', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final data = docs[index].data() as Map<String, dynamic>;
+              final docRef = docs[index].reference;
+              final status = data['status'] ?? 'preparing';
+              final customerName = data['customerName'] ?? '---';
+              final customerPhone2 = data['customerPhone'] ?? '';
+              final neighborhood = data['neighborhood'] ?? '';
+              final total = (data['totalAmount'] ?? 0).toStringAsFixed(0);
+              final restName = data['restaurantName'] ?? '';
+
+              Color statusColor;
+              String statusLabel;
+              switch (status) {
+                case 'preparing':
+                  statusColor = Colors.amber;
+                  statusLabel = '🧑‍🍳 جاري التحضير';
+                  break;
+                case 'onTheWay':
+                  statusColor = Colors.lightBlueAccent;
+                  statusLabel = '🛵 في الطريق';
+                  break;
+                case 'delivered':
+                  statusColor = Colors.greenAccent;
+                  statusLabel = '✅ تم التسليم';
+                  break;
+                default:
+                  statusColor = Colors.orangeAccent;
+                  statusLabel = '⏳ انتظار';
+              }
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: statusColor.withOpacity(0.35), width: 1.5),
+                  boxShadow: [BoxShadow(color: statusColor.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4))],
+                ),
+                child: Column(
+                  children: [
+                    // ─── Header ───
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [statusColor.withOpacity(0.12), Colors.transparent],
+                          begin: Alignment.topRight, end: Alignment.bottomLeft,
+                        ),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: statusColor.withOpacity(0.15),
+                            child: Icon(Icons.person_rounded, color: statusColor, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(customerName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                                Text(restName, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: statusColor.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: statusColor.withOpacity(0.4)),
+                            ),
+                            child: Text(statusLabel, style: TextStyle(color: statusColor, fontSize: 10.5, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(color: Colors.white10, height: 1),
+                    // ─── التفاصيل ───
+                    Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.location_on_rounded, color: Color(0xFFFF8F00), size: 16),
+                            const SizedBox(width: 6),
+                            Text('المنطقة: $neighborhood', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                            const Spacer(),
+                            const Icon(Icons.payments_rounded, color: Colors.greenAccent, size: 16),
+                            const SizedBox(width: 6),
+                            Text('$total د.ع', style: const TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                          ]),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            const Icon(Icons.phone_rounded, color: Colors.white38, size: 15),
+                            const SizedBox(width: 6),
+                            Text(customerPhone2, style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () async {
+                                final uri = Uri.parse('tel:$customerPhone2');
+                                if (await canLaunchUrl(uri)) launchUrl(uri);
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.07),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.white12),
+                                ),
+                                child: const Row(children: [
+                                  Icon(Icons.call_rounded, color: Colors.white54, size: 14),
+                                  SizedBox(width: 4),
+                                  Text('اتصال بالزبون', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                                ]),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 14),
+                          // ─── أزرار الإجراء ───
+                          if (status == 'preparing')
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () async {
+                                  await docRef.update({'status': 'onTheWay'});
+                                  jeebliNotifications.showOrderNotification(
+                                    title: '🛵 المندوب في الطريق!',
+                                    body: 'المندوب ${data['driverName'] ?? ''} استلم طلبك وهو في الطريق إليك الآن!',
+                                    id: index + 3000,
+                                  );
+                                },
+                                icon: const Icon(Icons.delivery_dining_rounded),
+                                label: const Text('استلمت الوجبة وأنا في الطريق 🛵'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.amber,
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                            ),
+                          if (status == 'onTheWay')
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () async {
+                                  await docRef.update({
+                                    'status': 'delivered',
+                                    'deliveredAt': FieldValue.serverTimestamp(),
+                                  });
+                                  jeebliNotifications.showOrderNotification(
+                                    title: '✅ تم تسليم الطلب!',
+                                    body: 'تم تسليم طلبك بنجاح! ألف عافية ❤️',
+                                    id: index + 4000,
+                                  );
+                                },
+                                icon: const Icon(Icons.check_circle_rounded),
+                                label: const Text('تم التسليم للزبون ✅'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.greenAccent,
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                            ),
+                          if (status == 'delivered')
+                            Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              alignment: Alignment.center,
+                              child: const Text('✅ تم إنهاء هذا الطلب بنجاح', style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -2980,9 +3957,9 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
                 color: Colors.white)),
-        leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => controller.setActiveRestaurant(null)),
+        leading: JeebliBackButton(
+          onPressed: () => controller.setActiveRestaurant(null),
+        ),
         backgroundColor: const Color(0xFF1E293B),
         elevation: 0,
       ),
@@ -3017,16 +3994,31 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                         Text(rest.cuisine,
                             style: const TextStyle(
                                 fontSize: 11, color: Colors.white54)),
-                        Row(children: [
-                          const Icon(Icons.star_rounded,
-                              color: Colors.amber, size: 14),
-                          const SizedBox(width: 4),
-                          Text('${rest.rating}',
-                              style: const TextStyle(
-                                  color: Colors.amber,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                        Row(
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.star_rounded,
+                                  color: Colors.amber, size: 14),
+                              const SizedBox(width: 4),
+                              Text('${rest.rating}',
+                                  style: const TextStyle(
+                                      color: Colors.amber,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold)),
+                            ]),
+                            const SizedBox(width: 12),
+                            Row(children: [
+                              const Icon(Icons.access_time_rounded,
+                                  color: Colors.amber, size: 12),
+                              const SizedBox(width: 4),
+                              Text('ساعات العمل: ${rest.workingHoursLabel}',
+                                  style: const TextStyle(
+                                      color: Colors.amber,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold)),
+                            ]),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -3410,11 +4402,29 @@ class CartScreen extends StatelessWidget {
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13,
                                           color: Colors.white)),
-                                  Text(
-                                      '${item.product.price.toStringAsFixed(0)} د.ع للوجبة',
-                                      style: const TextStyle(
-                                          color: Colors.white54,
-                                          fontSize: 10.5)),
+                                  if (item.product.discountPrice != null && item.product.discountPrice! < item.product.price)
+                                    Row(
+                                      children: [
+                                        Text(
+                                            '${item.product.price.toStringAsFixed(0)} د.ع',
+                                            style: const TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 10,
+                                                decoration: TextDecoration.lineThrough)),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                            '${item.product.discountPrice!.toStringAsFixed(0)} د.ع',
+                                            style: const TextStyle(
+                                                color: Colors.amber,
+                                                fontSize: 11)),
+                                      ],
+                                    )
+                                  else
+                                    Text(
+                                        '${item.product.price.toStringAsFixed(0)} د.ع للوجبة',
+                                        style: const TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 10.5)),
                                   Text(
                                       'الإجمالي: ${item.totalPrice.toStringAsFixed(0)} د.ع',
                                       style: const TextStyle(
@@ -3527,6 +4537,16 @@ class CartScreen extends StatelessWidget {
                       fontWeight: FontWeight.bold, color: Colors.greenAccent)),
             ]),
           ],
+          if (controller.appliedPromoDiscount > 0) ...[
+            const SizedBox(height: 6),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('🎟️ خصم كود الترويجي',
+                  style: TextStyle(color: Colors.amberAccent, fontSize: 12.5, fontWeight: FontWeight.bold)),
+              Text('-${controller.appliedPromoDiscount.toStringAsFixed(0)} د.ع',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.amberAccent)),
+            ]),
+          ],
           if (controller.loyaltySystemEnabled) ...[
             const SizedBox(height: 10),
             // ── كارت استبدال النقاط ──
@@ -3591,7 +4611,66 @@ class CartScreen extends StatelessWidget {
               ),
             ),
           ),
-        ],
+          ],
+          const SizedBox(height: 16),
+          // ── حقل الكود الترويجي ──
+          if (controller.appliedPromoCode == null)
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 45,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: TextField(
+                      controller: controller.promoCodeController,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: const InputDecoration(
+                        hintText: 'أدخل كود الخصم (إن وجد)',
+                        hintStyle: TextStyle(color: Colors.white38, fontSize: 12),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () {
+                    final msg = controller.applyPromoCode(controller.promoCodeController.text.trim());
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(msg),
+                      backgroundColor: msg.contains('بنجاح') ? Colors.green : Colors.redAccent,
+                    ));
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('تطبيق', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            )
+          else
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('الكود المستخدم: ${controller.appliedPromoCode}',
+                    style: const TextStyle(color: Colors.amber, fontSize: 12)),
+                TextButton(
+                  onPressed: () {
+                    controller.removePromoCode();
+                    controller.promoCodeController.clear();
+                  },
+                  child: const Text('إزالة', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                ),
+              ],
+            ),
+          const SizedBox(height: 16),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             const Text('المبلغ الكلي',
                 style: TextStyle(
@@ -4300,9 +5379,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         centerTitle: true,
         backgroundColor: const Color(0xFF1E293B),
         elevation: 0,
-        leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => Navigator.pop(context)),
+        leading: JeebliBackButton(
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -5110,6 +6189,9 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           // ─── بطاقة حالة المطعم (مفتوح / مغلق) ───
           _buildRestaurantStatusCard(context, controller),
           const SizedBox(height: 16),
+          // 🔔 الطلبات الواردة من الزبائن (Real-time)
+          _buildIncomingOrdersCard(context, controller),
+          const SizedBox(height: 16),
           _buildRestaurantLocationCard(context, controller),
           const SizedBox(height: 16),
           _buildOwnerOffersCard(context, controller),
@@ -5156,13 +6238,16 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
       (r) => r.id == restId,
       orElse: () => controller.allRestaurants.first,
     );
-    final isClosed = restaurant.isClosedManually;
+    
+    final isClosedManually = restaurant.isClosedManually;
+    final isClosedByTime = !restaurant.isOpenNow && !isClosedManually;
+    final isCurrentlyClosed = !restaurant.isOpenNow; // الحالة الفعلية الآن
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: isClosed
+          colors: isCurrentlyClosed
               ? [const Color(0xFF3D0000), const Color(0xFF1E293B)]
               : [const Color(0xFF003D1E), const Color(0xFF1E293B)],
           begin: Alignment.topRight,
@@ -5170,104 +6255,128 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isClosed
+          color: isCurrentlyClosed
               ? Colors.redAccent.withOpacity(0.5)
               : Colors.greenAccent.withOpacity(0.5),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: (isClosed ? Colors.red : Colors.green).withOpacity(0.15),
+            color: (isCurrentlyClosed ? Colors.red : Colors.green).withOpacity(0.15),
             blurRadius: 20,
             offset: const Offset(0, 6),
           )
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: (isClosed ? Colors.redAccent : Colors.greenAccent)
-                  .withOpacity(0.15),
-              border: Border.all(
-                color: isClosed ? Colors.redAccent : Colors.greenAccent,
-                width: 1.5,
-              ),
-            ),
-            child: Icon(
-              isClosed ? Icons.store_mall_directory_outlined : Icons.storefront_rounded,
-              color: isClosed ? Colors.redAccent : Colors.greenAccent,
-              size: 26,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  isClosed ? '🔴 مطعمك مغلق حالياً' : '🟢 مطعمك مفتوح للطلبات',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: isClosed ? Colors.redAccent : Colors.greenAccent,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: (isCurrentlyClosed ? Colors.redAccent : Colors.greenAccent)
+                      .withOpacity(0.15),
+                  border: Border.all(
+                    color: isCurrentlyClosed ? Colors.redAccent : Colors.greenAccent,
+                    width: 1.5,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  isClosed
-                      ? 'الزبائن لا يستطيعون الطلب الآن'
-                      : 'الزبائن يستطيعون الطلب منك الآن',
-                  style: const TextStyle(fontSize: 11, color: Colors.white54),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: () => controller.toggleRestaurantClosed(restId),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              width: 64,
-              height: 34,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                color: isClosed
-                    ? Colors.redAccent.withOpacity(0.3)
-                    : Colors.greenAccent.withOpacity(0.3),
-                border: Border.all(
-                  color: isClosed ? Colors.redAccent : Colors.greenAccent,
-                  width: 1.5,
+                child: Icon(
+                  isCurrentlyClosed ? Icons.store_mall_directory_outlined : Icons.storefront_rounded,
+                  color: isCurrentlyClosed ? Colors.redAccent : Colors.greenAccent,
+                  size: 26,
                 ),
               ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  AnimatedAlign(
-                    duration: const Duration(milliseconds: 300),
-                    alignment: isClosed
-                        ? Alignment.centerLeft
-                        : Alignment.centerRight,
-                    child: Container(
-                      width: 26,
-                      height: 26,
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isClosed ? Colors.redAccent : Colors.greenAccent,
-                      ),
-                      child: Icon(
-                        isClosed ? Icons.close : Icons.check,
-                        size: 14,
-                        color: Colors.white,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isClosedManually
+                          ? '🔴 مغلق حالياً (إغلاق إجباري يدوي)'
+                          : isClosedByTime
+                              ? '🔴 مغلق حالياً (خارج أوقات العمل)'
+                              : '🟢 مطعمك مفتوح للطلبات',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: isCurrentlyClosed ? Colors.redAccent : Colors.greenAccent,
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      isCurrentlyClosed
+                          ? 'الزبائن لا يستطيعون الطلب الآن'
+                          : 'الزبائن يستطيعون الطلب منك الآن',
+                      style: const TextStyle(fontSize: 11, color: Colors.white54),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              const SizedBox(width: 12),
+              // التوجل الخاص بالإغلاق اليدوي (يتحكم فقط في isClosedManually)
+              GestureDetector(
+                onTap: () => controller.toggleRestaurantClosed(restId),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  width: 64,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    color: isClosedManually
+                        ? Colors.redAccent.withOpacity(0.3)
+                        : Colors.white12, // لون محايد إذا لم يكن مغلق يدوياً
+                    border: Border.all(
+                      color: isClosedManually ? Colors.redAccent : Colors.white30,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      AnimatedAlign(
+                        duration: const Duration(milliseconds: 300),
+                        alignment: isClosedManually
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        child: Container(
+                          width: 26,
+                          height: 26,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isClosedManually ? Colors.redAccent : Colors.grey,
+                          ),
+                          child: Icon(
+                            isClosedManually ? Icons.lock : Icons.lock_open,
+                            size: 14,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: Colors.white12, height: 1),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Icon(Icons.access_time_filled_rounded, color: Colors.white54, size: 16),
+              const SizedBox(width: 6),
+              const Text('ساعات العمل: ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                restaurant.workingHoursLabel,
+                style: const TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ],
           ),
         ],
       ),
@@ -5533,6 +6642,347 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 🔔 بطاقة الطلبات الواردة Real-time من Firestore
+  Widget _buildIncomingOrdersCard(
+      BuildContext context, JeebliController controller) {
+    final myId = controller.userRestaurantId ?? '';
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFF8F00).withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Row(
+              children: [
+                const Icon(Icons.notifications_active_rounded,
+                    color: Color(0xFFFF8F00), size: 22),
+                const SizedBox(width: 8),
+                const Text('الطلبات الواردة 🔔',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14)),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF8F00).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: const Color(0xFFFF8F00).withOpacity(0.4)),
+                  ),
+                  child: const Text('مباشر 🔴',
+                      style: TextStyle(
+                          color: Color(0xFFFF8F00),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+          const Divider(color: Colors.white12, height: 1),
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('orders')
+                .where('restaurantId', isEqualTo: myId)
+                .orderBy('createdAt', descending: true)
+                .limit(10)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Center(
+                      child: CircularProgressIndicator(
+                          color: Color(0xFFFF8F00), strokeWidth: 2)),
+                );
+              }
+              final docs = snapshot.data?.docs ?? [];
+              if (docs.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Center(
+                    child: Text('لا توجد طلبات واردة حتى الآن 📭',
+                        style:
+                            TextStyle(color: Colors.white38, fontSize: 13)),
+                  ),
+                );
+              }
+              return ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: docs.length,
+                separatorBuilder: (context, index) =>
+                    const Divider(color: Colors.white10, height: 1),
+                itemBuilder: (context, index) {
+                  final data = docs[index].data() as Map<String, dynamic>;
+                  final status = data['status'] ?? 'pending';
+                  final total =
+                      (data['totalAmount'] ?? 0).toStringAsFixed(0);
+                  final customer = data['customerName'] ?? '---';
+                  final phone = data['customerPhone'] ?? '';
+                  final neighborhood = data['neighborhood'] ?? '';
+                  // ignore: unused_local_variable
+                  final orderId = data['orderId'] ?? docs[index].id;
+
+                  Color statusColor;
+                  String statusLabel;
+                  switch (status) {
+                    case 'accepted':
+                      statusColor = Colors.greenAccent;
+                      statusLabel = '✅ مقبول';
+                      break;
+                    case 'rejected':
+                      statusColor = Colors.redAccent;
+                      statusLabel = '❌ مرفوض';
+                      break;
+                    case 'delivered':
+                      statusColor = Colors.blueAccent;
+                      statusLabel = '🛵 تم التوصيل';
+                      break;
+                    default:
+                      statusColor = Colors.orangeAccent;
+                      statusLabel = '⏳ جديد';
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '$customer  •  $neighborhood',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: statusColor.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: statusColor.withOpacity(0.5)),
+                              ),
+                              child: Text(statusLabel,
+                                  style: TextStyle(
+                                      color: statusColor,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text('📞 $phone  |  💰 $total د.ع',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 11.5)),
+                        const SizedBox(height: 6),
+                        if (status == 'pending')
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final driverNameCtrl = TextEditingController();
+                                    final driverPhoneCtrl = TextEditingController();
+                                    final docRef = docs[index].reference;
+                                    final customerName2 = data['customerName'] ?? '';
+                                    await showDialog(
+                                      context: context,
+                                      builder: (ctx) => Directionality(
+                                        textDirection: TextDirection.rtl,
+                                        child: AlertDialog(
+                                          backgroundColor: const Color(0xFF1E293B),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                          title: Column(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.all(12),
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: Colors.greenAccent.withOpacity(0.1),
+                                                  border: Border.all(color: Colors.greenAccent.withOpacity(0.4)),
+                                                ),
+                                                child: const Icon(Icons.delivery_dining_rounded, color: Colors.greenAccent, size: 32),
+                                              ),
+                                              const SizedBox(height: 10),
+                                              const Text('تعيين مندوب التوصيل',
+                                                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                                              Text('طلب: $customerName2',
+                                                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                                            ],
+                                          ),
+                                          content: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Divider(color: Colors.white12),
+                                              const SizedBox(height: 8),
+                                              TextField(
+                                                controller: driverNameCtrl,
+                                                style: const TextStyle(color: Colors.white),
+                                                textDirection: TextDirection.rtl,
+                                                decoration: InputDecoration(
+                                                  hintText: 'اسم المندوب',
+                                                  hintStyle: const TextStyle(color: Colors.white38),
+                                                  prefixIcon: const Icon(Icons.person_rounded, color: Color(0xFFFF8F00), size: 18),
+                                                  filled: true,
+                                                  fillColor: Colors.white.withOpacity(0.05),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                                                  ),
+                                                  enabledBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                                                  ),
+                                                  focusedBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: const BorderSide(color: Color(0xFFFF8F00)),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 12),
+                                              TextField(
+                                                controller: driverPhoneCtrl,
+                                                style: const TextStyle(color: Colors.white),
+                                                keyboardType: TextInputType.phone,
+                                                textDirection: TextDirection.rtl,
+                                                decoration: InputDecoration(
+                                                  hintText: 'رقم هاتف المندوب (07...)',
+                                                  hintStyle: const TextStyle(color: Colors.white38),
+                                                  prefixIcon: const Icon(Icons.phone_rounded, color: Color(0xFFFF8F00), size: 18),
+                                                  filled: true,
+                                                  fillColor: Colors.white.withOpacity(0.05),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                                                  ),
+                                                  enabledBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                                                  ),
+                                                  focusedBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: const BorderSide(color: Color(0xFFFF8F00)),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              const Text(
+                                                'سيتم إرسال الطلب لهذا المندوب فوراً',
+                                                style: TextStyle(color: Colors.white38, fontSize: 10),
+                                              ),
+                                            ],
+                                          ),
+                                          actionsAlignment: MainAxisAlignment.center,
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(ctx),
+                                              child: const Text('إلغاء', style: TextStyle(color: Colors.white38)),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            ElevatedButton.icon(
+                                              onPressed: () async {
+                                                final dName = driverNameCtrl.text.trim();
+                                                final dPhone = driverPhoneCtrl.text.trim();
+                                                if (dName.isEmpty || dPhone.isEmpty) return;
+                                                await docRef.update({
+                                                  'status': 'preparing',
+                                                  'driverName': dName,
+                                                  'driverPhone': dPhone,
+                                                  'acceptedAt': FieldValue.serverTimestamp(),
+                                                });
+                                                jeebliNotifications.showOrderNotification(
+                                                  title: '✅ تم قبول طلبك!',
+                                                  body: 'طلبك قيد التحضير الآن 👨‍🍳 المندوب $dName في طريقه قريباً!',
+                                                  id: index + 2000,
+                                                );
+                                                if (ctx.mounted) Navigator.pop(ctx);
+                                              },
+                                              icon: const Icon(Icons.delivery_dining_rounded, size: 16),
+                                              label: const Text('قبول وتعيين المندوب'),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.greenAccent,
+                                                foregroundColor: Colors.black,
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.delivery_dining_rounded, size: 16),
+                                  label: const Text('✅ قبول + تعيين مندوب', style: TextStyle(fontSize: 11)),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.greenAccent,
+                                    side: const BorderSide(color: Colors.greenAccent),
+                                    padding: const EdgeInsets.symmetric(vertical: 6),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => docs[index]
+                                      .reference
+                                      .update({'status': 'rejected'}),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.redAccent,
+                                    side: const BorderSide(color: Colors.redAccent),
+                                    padding: const EdgeInsets.symmetric(vertical: 6),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  child: const Text('❌ رفض', style: TextStyle(fontSize: 12)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (status == 'preparing') ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                            ),
+                            child: Row(children: [
+                              const Icon(Icons.delivery_dining_rounded, color: Colors.amber, size: 14),
+                              const SizedBox(width: 6),
+                              Expanded(child: Text(
+                                '🧑‍🍳 جاري التحضير — المندوب: ${data['driverName'] ?? '---'} (${data['driverPhone'] ?? ''})',
+                                style: const TextStyle(color: Colors.amber, fontSize: 10.5),
+                              )),
+                            ]),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ],
       ),
     );
   }

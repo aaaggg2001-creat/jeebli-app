@@ -100,6 +100,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen>
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A), // خلفية داكنة تعكس الطابع الاحترافي للادمن
       appBar: AppBar(
+        leading: const JeebliBackButton(),
         backgroundColor: const Color(0xFF1E293B),
         elevation: 0,
         title: Row(
