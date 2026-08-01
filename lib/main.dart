@@ -2697,7 +2697,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
           : ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: controller.notifications.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              separatorBuilder: (context2, i) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
                 final notif = controller.notifications[index];
                 return Container(
@@ -5575,7 +5575,6 @@ class _PromoCodeFieldState extends State<_PromoCodeField> {
                     widget.controller.removePromoCode();
                     _promoController.clear();
                     setState(() {
-                      _promoSuccess = false;
                       _promoError = null;
                     });
                   },
