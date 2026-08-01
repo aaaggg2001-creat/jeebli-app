@@ -34,6 +34,9 @@ jobs:
       - name: Build APK
         run: flutter build apk --release
 
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Jeebli-App.apk
+
       - name: Upload APK to GitHub Releases
         uses: ncipollo/release-action@v1
         with:
@@ -48,8 +51,7 @@ jobs:
             3. اضغط "تثبيت" وامنح الأذونات المطلوبة
 
             > 📝 آخر تحديث: ${{ github.event.head_commit.message }}
-          artifacts: "build/app/outputs/flutter-apk/app-release.apk"
-          artifactName: "Jeebli-App.apk"
+          artifacts: "build/app/outputs/flutter-apk/Jeebli-App.apk"
           allowUpdates: true
           makeLatest: true
           removeArtifacts: true
