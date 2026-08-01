@@ -946,6 +946,35 @@ class JeebliController extends ChangeNotifier {
   List<AppNotification> notifications = [];
   int unreadNotifications = 0;
 
+  // --- Promo Code ---
+  String _appliedPromoCode = '';
+  double _promoDiscount = 0.0;
+  String get appliedPromoCode => _appliedPromoCode;
+  double get promoDiscount => _promoDiscount;
+
+  bool applyPromoCode(String code) {
+    final Map<String, double> validCodes = {
+      'JEEBLI10': 0.10,
+      'JEEBLI20': 0.20,
+      'WELCOME': 0.15,
+      'JEEBLI50': 0.50,
+    };
+    final upper = code.trim().toUpperCase();
+    if (validCodes.containsKey(upper)) {
+      _appliedPromoCode = upper;
+      _promoDiscount = subtotal * validCodes[upper]!;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  void removePromoCode() {
+    _appliedPromoCode = '';
+    _promoDiscount = 0.0;
+    notifyListeners();
+  }
+
   double restaurantRating = 0;
   double driverRating = 0;
   String feedbackText = '';
@@ -2527,6 +2556,7 @@ class MainNavigationShell extends StatelessWidget {
     final screens = [
       const HomeRestaurantsScreen(),
       const CartScreen(),
+      const CustomerNotificationsScreen(),
       const CustomerProfileScreen(),
     ];
 
@@ -2591,6 +2621,31 @@ class MainNavigationShell extends StatelessWidget {
               label: 'السلة',
             ),
             NavigationDestination(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(Icons.notifications_outlined, color: controller.subtextColor),
+                  if (controller.unreadNotifications > 0)
+                    Positioned(
+                      right: -8,
+                      top: -8,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                            color: Colors.redAccent, shape: BoxShape.circle),
+                        child: Text('${controller.unreadNotifications}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    )
+                ],
+              ),
+              selectedIcon: const Icon(Icons.notifications, color: Color(0xFFFF8F00)),
+              label: 'إشعاراتي',
+            ),
+            NavigationDestination(
               icon: Icon(Icons.person_outline, color: controller.subtextColor),
               selectedIcon: const Icon(Icons.person, color: Color(0xFFFF8F00)),
               label: 'الحساب',
@@ -2598,6 +2653,138 @@ class MainNavigationShell extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// ============================================================================
+/// شاشة إشعارات الزبون
+/// ============================================================================
+
+class CustomerNotificationsScreen extends StatelessWidget {
+  const CustomerNotificationsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = JeebliProvider.of(context);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (controller.unreadNotifications > 0) {
+        controller.markNotificationsRead();
+      }
+    });
+
+    return Scaffold(
+      backgroundColor: controller.bgColor,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: Text('إشعاراتي 🔔',
+            style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 17,
+                color: controller.textColor)),
+        centerTitle: true,
+        backgroundColor: controller.cardColor,
+        elevation: 0,
+        actions: [
+          if (controller.notifications.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                controller.notifications.clear();
+                controller.notifyListeners();
+              },
+              child: const Text('مسح الكل',
+                  style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+            ),
+        ],
+      ),
+      body: controller.notifications.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.notifications_off_outlined,
+                      size: 80,
+                      color: controller.subtextColor.withOpacity(0.4)),
+                  const SizedBox(height: 16),
+                  Text('لا توجد إشعارات بعد',
+                      style: TextStyle(
+                          color: controller.subtextColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text('ستظهر هنا إشعارات طلباتك وعروضك',
+                      style: TextStyle(
+                          color: controller.subtextColor.withOpacity(0.6),
+                          fontSize: 13)),
+                ],
+              ),
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: controller.notifications.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final notif = controller.notifications[index];
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: notif.isWarning
+                        ? Colors.red.withOpacity(0.1)
+                        : controller.cardColor,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: notif.isWarning
+                          ? Colors.redAccent.withOpacity(0.3)
+                          : Colors.white.withOpacity(0.05),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: notif.isWarning
+                              ? Colors.redAccent.withOpacity(0.15)
+                              : const Color(0xFFFF8F00).withOpacity(0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          notif.isWarning
+                              ? Icons.warning_amber_rounded
+                              : Icons.notifications_rounded,
+                          color: notif.isWarning
+                              ? Colors.redAccent
+                              : const Color(0xFFFF8F00),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(notif.message,
+                                style: TextStyle(
+                                    color: controller.textColor,
+                                    fontSize: 13,
+                                    height: 1.4)),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${notif.time.hour.toString().padLeft(2, '0')}:${notif.time.minute.toString().padLeft(2, '0')}',
+                              style: TextStyle(
+                                  color: controller.subtextColor,
+                                  fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
     );
   }
 }
@@ -5201,42 +5388,71 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Widget _buildOrderSummaryCard(JeebliController controller) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.05))),
-      child: Column(children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('مجموع الوجبات',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
-          Text('${controller.subtotal.toStringAsFixed(0)} د.ع',
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, color: Colors.white)),
-        ]),
-        const SizedBox(height: 6),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('توصيل جيب لي',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
-          Text('${controller.deliveryFee.toStringAsFixed(0)} د.ع',
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, color: Colors.white)),
-        ]),
-        const Divider(height: 18, color: Colors.white12),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('الإجمالي الكلي',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold, color: Colors.white)),
-          Text('${controller.totalAmount.toStringAsFixed(0)} د.ع',
-              style: const TextStyle(
-                  color: Color(0xFFFF8F00),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16)),
-        ]),
-      ]),
+    return Column(
+      children: [
+        // --- حقل كود الخصم ---
+        _PromoCodeField(controller: controller),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withOpacity(0.05))),
+          child: Column(children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('مجموع الوجبات',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              Text('${controller.subtotal.toStringAsFixed(0)} د.ع',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.white)),
+            ]),
+            const SizedBox(height: 6),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('توصيل جيب لي',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              Text('${controller.deliveryFee.toStringAsFixed(0)} د.ع',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.white)),
+            ]),
+            if (controller.promoDiscount > 0) ...[
+              const SizedBox(height: 6),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Row(children: [
+                  const Icon(Icons.local_offer_rounded,
+                      color: Colors.greenAccent, size: 14),
+                  const SizedBox(width: 4),
+                  Text('خصم كود ${controller.appliedPromoCode}',
+                      style: const TextStyle(
+                          color: Colors.greenAccent, fontSize: 12)),
+                ]),
+                Text('- ${controller.promoDiscount.toStringAsFixed(0)} د.ع',
+                    style: const TextStyle(
+                        color: Colors.greenAccent,
+                        fontWeight: FontWeight.bold)),
+              ]),
+            ],
+            const Divider(height: 18, color: Colors.white12),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('الإجمالي الكلي',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.white)),
+              Text(
+                '${(controller.totalAmount - controller.promoDiscount).clamp(0, double.infinity).toStringAsFixed(0)} د.ع',
+                style: const TextStyle(
+                    color: Color(0xFFFF8F00),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16),
+              ),
+            ]),
+          ]),
+        ),
+      ],
     );
   }
+
+  Widget _buildPromoCodeWidget(JeebliController controller) =>
+      _PromoCodeField(controller: controller);
 
   void _showWhatsAppConfirmationDialog(
       BuildContext context, JeebliController controller) {
@@ -5317,6 +5533,161 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// ويدجت حقل إدخال كود الخصم
+class _PromoCodeField extends StatefulWidget {
+  final JeebliController controller;
+  const _PromoCodeField({required this.controller});
+
+  @override
+  State<_PromoCodeField> createState() => _PromoCodeFieldState();
+}
+
+class _PromoCodeFieldState extends State<_PromoCodeField> {
+  final _promoController = TextEditingController();
+  String? _promoError;
+  bool _promoSuccess = false;
+
+  @override
+  void dispose() {
+    _promoController.dispose();
+    super.dispose();
+  }
+
+  void _apply() {
+    final code = _promoController.text.trim();
+    if (code.isEmpty) return;
+    final success = widget.controller.applyPromoCode(code);
+    setState(() {
+      _promoSuccess = success;
+      _promoError = success ? null : '❌ الكود غير صحيح أو منتهي الصلاحية';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasCode = widget.controller.appliedPromoCode.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: hasCode
+            ? Colors.green.withOpacity(0.08)
+            : const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: hasCode
+              ? Colors.greenAccent.withOpacity(0.4)
+              : Colors.white.withOpacity(0.07),
+        ),
+      ),
+      child: hasCode
+          ? Row(
+              children: [
+                const Icon(Icons.check_circle_rounded,
+                    color: Colors.greenAccent, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'تم تطبيق كود ${widget.controller.appliedPromoCode} 🎉',
+                    style: const TextStyle(
+                        color: Colors.greenAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    widget.controller.removePromoCode();
+                    _promoController.clear();
+                    setState(() {
+                      _promoSuccess = false;
+                      _promoError = null;
+                    });
+                  },
+                  child: const Icon(Icons.close, color: Colors.white38, size: 18),
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _promoController,
+                        textDirection: TextDirection.ltr,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            letterSpacing: 1.2),
+                        decoration: InputDecoration(
+                          hintText: 'أدخل كود الخصم',
+                          hintStyle: const TextStyle(
+                              color: Colors.white38, fontSize: 12),
+                          prefixIcon: const Icon(Icons.local_offer_outlined,
+                              color: Color(0xFFFF8F00), size: 18),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          isDense: true,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                BorderSide(color: Colors.white.withOpacity(0.1)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                BorderSide(color: Colors.white.withOpacity(0.1)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(
+                                color: Color(0xFFFF8F00), width: 1.5),
+                          ),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.05),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _apply,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF8F00),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        minimumSize: Size.zero,
+                      ),
+                      child: const Text('تطبيق',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                  ],
+                ),
+                if (_promoError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, right: 4),
+                    child: Text(_promoError!,
+                        style: const TextStyle(
+                            color: Colors.redAccent, fontSize: 11)),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, right: 4),
+                  child: Text(
+                    '💡 جرب: JEEBLI10 للخصم 10%  |  WELCOME للخصم 15%',
+                    style:
+                        TextStyle(color: Colors.white38, fontSize: 10),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
