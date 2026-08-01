@@ -24,6 +24,10 @@ void main() async {
         projectId: 'jeebli-app',
       ),
     );
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
   } catch (e) {
     debugPrint('Firebase init note: $e');
   }
@@ -49,7 +53,6 @@ class Restaurant {
   String serviceArea;
   double deliveryFee;
   String? ownerPhone;
-  String? ownerPassword;
   final int openHour;   // 0-23
   final int closeHour;  // 0-23
   double? restaurantLat;  // موقع المطعم
@@ -70,7 +73,6 @@ class Restaurant {
     this.serviceArea = 'الهاشمية',
     this.deliveryFee = 1500,
     this.ownerPhone,
-    this.ownerPassword,
     this.openHour = 0,
     this.closeHour = 24,
     this.restaurantLat,
@@ -120,7 +122,6 @@ class Restaurant {
       'serviceArea': serviceArea,
       'deliveryFee': deliveryFee,
       'ownerPhone': ownerPhone,
-      'ownerPassword': ownerPassword,
       'openHour': openHour,
       'closeHour': closeHour,
       'restaurantLat': restaurantLat,
@@ -144,7 +145,6 @@ class Restaurant {
       serviceArea: map['serviceArea'] ?? 'الهاشمية',
       deliveryFee: (map['deliveryFee'] ?? 1500).toDouble(),
       ownerPhone: map['ownerPhone'],
-      ownerPassword: map['ownerPassword'],
       openHour: map['openHour'] ?? 0,
       closeHour: map['closeHour'] ?? 24,
       restaurantLat: map['restaurantLat'] != null ? (map['restaurantLat'] as num).toDouble() : null,
@@ -614,7 +614,6 @@ class JeebliController extends ChangeNotifier {
       whatsappNumber: '07802019730',
       imageUrl: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80',
       ownerPhone: '07802019730',
-      ownerPassword: '123456',
       deliveryFee: 1500,
       openHour: 0,
       closeHour: 24,
@@ -630,7 +629,6 @@ class JeebliController extends ChangeNotifier {
       whatsappNumber: '07800108275',
       imageUrl: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80',
       ownerPhone: '07800108275',
-      ownerPassword: '123456',
       deliveryFee: 1500,
       openHour: 0,
       closeHour: 24,
@@ -734,7 +732,7 @@ class JeebliController extends ChangeNotifier {
   String cardExpiry = '';
   String cardCvv = '';
 
-  final double deliveryFee = 1500;
+  double get deliveryFee => _activeRestaurant?.deliveryFee ?? 1500.0;
 
   OrderStatus _orderStatus = OrderStatus.idle;
   List<AppNotification> notifications = [];
@@ -1085,7 +1083,6 @@ class JeebliController extends ChangeNotifier {
         serviceArea: r.serviceArea,
         deliveryFee: deliveryFee ?? r.deliveryFee,
         ownerPhone: r.ownerPhone,
-        ownerPassword: r.ownerPassword,
         openHour: openHour ?? r.openHour,
         closeHour: closeHour ?? r.closeHour,
       );
@@ -1100,7 +1097,7 @@ class JeebliController extends ChangeNotifier {
     }
   }
 
-  bool loginOwnerOrAdmin(String phone, String password) {
+  Future<bool> loginOwnerOrAdmin(String phone, String password) async {
     if (phone == '07802019730' && password == '@a20012005b@') {
       _isLoggedIn = true;
       _userRole = 'superadmin';
@@ -1109,28 +1106,23 @@ class JeebliController extends ChangeNotifier {
       return true;
     }
 
-    final rest = _restaurants.firstWhere(
-      (r) => r.ownerPhone == phone && r.ownerPassword == password,
-      orElse: () => Restaurant(
-        id: '',
-        name: '',
-        location: '',
-        cuisine: '',
-        rating: 0,
-        deliveryTime: '',
-        imageUrl: '',
-        description: '',
-        whatsappNumber: '',
-      ),
-    );
-
-    if (rest.id.isNotEmpty) {
-      _isLoggedIn = true;
-      _userRole = 'owner';
-      _userRestaurantId = rest.id;
-      saveSession();
-      notifyListeners();
-      return true;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('admin_credentials').doc(phone).get();
+      if (doc.exists && doc.data()?['password'] == password) {
+        final data = doc.data()!;
+        _isLoggedIn = true;
+        _userRole = data['role'] ?? 'owner';
+        if (_userRole == 'owner') {
+          _userRestaurantId = data['restaurantId'];
+        } else {
+          _userRestaurantId = null;
+        }
+        saveSession();
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Login error: $e');
     }
 
     return false;
@@ -1380,6 +1372,11 @@ class JeebliController extends ChangeNotifier {
       return false;
     }
 
+    // التحقق الصارم من صلاحيات الموقع وجلب إحداثيات الـ GPS قبل إتمام الطلب
+    if (customerLat == null || customerLng == null) {
+      await detectLocation();
+    }
+
     _lastOrderToken = SecurityEngine.encryptOrderData({
       'customer': customerName,
       'phone': customerPhone,
@@ -1414,6 +1411,10 @@ class JeebliController extends ChangeNotifier {
         ? '\n📍 *موقع الزبون المباشر على الخريطة:* https://maps.google.com/?q=$customerLat,$customerLng'
         : '';
 
+    final deliveryText = deliveryFee == 0
+        ? 'مجاني 🎁'
+        : '${deliveryFee.toStringAsFixed(0)} د.ع';
+
     final message = '''
 🧾 *طلب جديد - جيب لي ديلفري* 🛵
 --------------------------------
@@ -1428,10 +1429,10 @@ class JeebliController extends ChangeNotifier {
 $itemsText
 --------------------------------
 💵 *مجموع الوجبات:* ${subtotal.toStringAsFixed(0)} د.ع
-🛵 *أجور التوصيل:* ${deliveryFee.toStringAsFixed(0)} د.ع${loyaltyDiscount > 0 ? '\n🌟 *خصم النقاط:* -${loyaltyDiscount.toStringAsFixed(0)} د.ع' : ''}
+🛵 *أجور التوصيل:* $deliveryText${loyaltyDiscount > 0 ? '\n🌟 *خصم النقاط:* -${loyaltyDiscount.toStringAsFixed(0)} د.ع' : ''}
 💰 *المبلغ الصافي المطلوب:* ${totalAmount.toStringAsFixed(0)} د.ع
 
-💳 *طريقة الدفع:* ${paymentMethod == PaymentMethod.cod ? 'كاش عند الاستلام' : 'ماستركارد'}
+💳 *طريقة الدفع:* كاش عند الاستلام
 --------------------------------
 شكراً لطلبكم عبر تطبيق جيب لي! 🚀
 ''';
@@ -1615,18 +1616,27 @@ $itemsText
       }
 
       // فحص أصحاب المطاعم ديناميكياً
-      for (var r in _restaurants) {
-        if (r.ownerPhone == idNormalized && r.ownerPassword == password) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('admin_credentials').doc(idNormalized).get();
+        if (doc.exists && doc.data()?['password'] == password) {
+          final data = doc.data()!;
           _isLoggedIn = true;
-          _userRole = 'owner';
+          _userRole = data['role'] ?? 'owner';
           _userEmailOrPhone = idNormalized;
-          _userRestaurantId = r.id;
+          if (_userRole == 'owner') {
+            _userRestaurantId = data['restaurantId'];
+            final rest = _restaurants.firstWhere((r) => r.id == _userRestaurantId, orElse: () => _restaurants.first);
+            _addNotification('🏪 مرحباً بك! تم تسجيل دخولك كمالك لـ ${rest.name}', isOwnerNotification: true);
+          } else {
+            _userRestaurantId = null;
+            _addNotification('🔑 مرحباً بك في لوحة الإدارة العليا!');
+          }
           saveSession();
-          _addNotification('🏪 مرحباً بك! تم تسجيل دخولك كمالك لـ ${r.name}',
-              isOwnerNotification: true);
           notifyListeners();
           return true;
         }
+      } catch (e) {
+        debugPrint('Admin credentials login error: $e');
       }
     }
 
@@ -2215,18 +2225,36 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
     final controller = JeebliProvider.of(context);
     if (controller.activeRestaurant != null) return const RestaurantMenuScreen();
 
-    final filteredRestaurants = _searchQuery.isEmpty
-        ? controller.restaurants
-        : controller.restaurants
-            .where((r) =>
-                r.name.contains(_searchQuery) ||
-                r.cuisine.contains(_searchQuery) ||
-                r.description.contains(_searchQuery))
-            .toList();
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('restaurants').snapshots(),
+      builder: (context, snapshot) {
+        List<Restaurant> liveRestaurants = controller.restaurants;
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+          liveRestaurants = snapshot.data!.docs
+              .map((doc) => Restaurant.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+              .toList();
+          // ترتيب المطاعم حسس الأقرب إذا كانت إحداثيات الزبون متوفرة
+          if (controller.customerLat != null && controller.customerLng != null) {
+            liveRestaurants.sort((a, b) {
+              final dA = a.distanceTo(controller.customerLat, controller.customerLng) ?? double.infinity;
+              final dB = b.distanceTo(controller.customerLat, controller.customerLng) ?? double.infinity;
+              return dA.compareTo(dB);
+            });
+          }
+        }
 
-    return SafeArea(
-      child: CustomScrollView(
-        slivers: [
+        final filteredRestaurants = _searchQuery.isEmpty
+            ? liveRestaurants
+            : liveRestaurants
+                .where((r) =>
+                    r.name.contains(_searchQuery) ||
+                    r.cuisine.contains(_searchQuery) ||
+                    r.description.contains(_searchQuery))
+                .toList();
+
+        return SafeArea(
+          child: CustomScrollView(
+            slivers: [
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -2709,19 +2737,31 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
         ],
       ),
     );
+  },
+);
   }
 
   Widget _buildPromoSlider(BuildContext context) {
     final controller = JeebliProvider.of(context);
-    final activeOffers = controller.offers;
 
-    if (activeOffers.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('offers').snapshots(),
+      builder: (context, snapshot) {
+        List<Offer> activeOffers = controller.offers;
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+          activeOffers = snapshot.data!.docs
+              .map((doc) => Offer.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+              .where((o) => o.isActive)
+              .toList();
+        }
 
-    return SizedBox(
-      height: 125,
-      child: PageView.builder(
+        if (activeOffers.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return SizedBox(
+          height: 125,
+          child: PageView.builder(
         controller: PageController(viewportFraction: 0.92),
         itemCount: activeOffers.length,
         itemBuilder: (ctx, i) {
@@ -2808,6 +2848,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
         },
       ),
     );
+  },
+);
   }
 
   Widget _buildActiveOrderBanner(JeebliController controller) {
@@ -2880,22 +2922,35 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
   Widget build(BuildContext context) {
     final controller = JeebliProvider.of(context);
     final rest = controller.activeRestaurant!;
-    final all = controller.getProductsByRestaurant(rest.id);
-    final categoryFiltered = controller.selectedCategoryId == 'all'
-        ? all
-        : controller.selectedCategoryId == 'favs'
-            ? all.where((p) => controller.isProductFavorite(p.id)).toList()
-            : all
-                .where((p) => p.categoryId == controller.selectedCategoryId)
-                .toList();
 
-    final filtered = _searchQuery.isEmpty
-        ? categoryFiltered
-        : categoryFiltered
-            .where((p) =>
-                p.name.contains(_searchQuery) ||
-                p.description.contains(_searchQuery))
-            .toList();
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('products')
+          .where('restaurantId', isEqualTo: rest.id)
+          .snapshots(),
+      builder: (context, snapshot) {
+        List<Product> liveProducts = controller.getProductsByRestaurant(rest.id);
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+          liveProducts = snapshot.data!.docs
+              .map((doc) => Product.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+              .toList();
+        }
+
+        final categoryFiltered = controller.selectedCategoryId == 'all'
+            ? liveProducts
+            : controller.selectedCategoryId == 'favs'
+                ? liveProducts.where((p) => controller.isProductFavorite(p.id)).toList()
+                : liveProducts
+                    .where((p) => p.categoryId == controller.selectedCategoryId)
+                    .toList();
+
+        final filtered = _searchQuery.isEmpty
+            ? categoryFiltered
+            : categoryFiltered
+                .where((p) =>
+                    p.name.contains(_searchQuery) ||
+                    p.description.contains(_searchQuery))
+                .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
@@ -3224,6 +3279,8 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
         ],
       ),
     );
+  },
+);
   }
 }
 
@@ -4967,8 +5024,6 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = JeebliProvider.of(context);
-    final isAkkalaOwner = controller.userRestaurantId == 'akkala';
-    final isAbuAlAbdOwner = controller.userRestaurantId == 'abualabd';
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
@@ -5246,6 +5301,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             child: ElevatedButton.icon(
               onPressed: () async {
                 final success = await controller.detectLocation();
+                if (!context.mounted) return;
                 if (success && controller.customerLat != null && controller.customerLng != null) {
                   controller.updateRestaurantLocation(rest.id, controller.customerLat!, controller.customerLng!);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -5474,7 +5530,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
         .where((o) => o.restaurantId == restId)
         .toList();
     final totalSales =
-        restaurantOrders.fold(0.0, (sum, o) => sum + o.totalAmount);
+        restaurantOrders.fold(0.0, (acc, o) => acc + o.totalAmount);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -5785,12 +5841,13 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
               onPressed: () => Navigator.pop(ctx),
               child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               final phone = phoneCtrl.text.trim();
               final pass = passCtrl.text.trim();
               if (phone.isEmpty || pass.isEmpty) return;
 
-              bool success = controller.loginOwnerOrAdmin(phone, pass);
+              bool success = await controller.loginOwnerOrAdmin(phone, pass);
+              if (!context.mounted) return;
               if (success) {
                 Navigator.pop(ctx);
               } else {
@@ -6023,6 +6080,11 @@ void _showOwnerProductDialog(
       TextEditingController(text: product?.imageUrl ?? '');
   final discountController =
       TextEditingController(text: product?.discountPrice?.toString() ?? '');
+  final percentageController = TextEditingController(
+      text: (product?.discountPrice != null && (product?.price ?? 0) > 0)
+          ? (((product!.price - product.discountPrice!) / product.price) * 100)
+              .toStringAsFixed(0)
+          : '');
 
   final allowedCategories = [
     'burger', 'zinger', 'shawarma', 'pizza', 'fries', 'drinks', 'other'
@@ -6083,9 +6145,28 @@ void _showOwnerProductDialog(
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  _darkInput('سعر التخفيض (اختياري)', discountController,
-                      type: TextInputType.number),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _darkInput('نسبة الخصم % (1-100)', percentageController,
+                            type: TextInputType.number, onChanged: (val) {
+                          final pct = double.tryParse(val);
+                          final price = double.tryParse(priceController.text) ?? 0;
+                          if (pct != null && pct > 0 && pct <= 100 && price > 0) {
+                            final newPrice = price - (price * (pct / 100));
+                            setState(() {
+                              discountController.text = newPrice.toStringAsFixed(0);
+                            });
+                          }
+                        }),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _darkInput('السعر بعد الخصم (د.ع)', discountController,
+                            type: TextInputType.number),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
                     value: selectedCategory,
@@ -6181,10 +6262,11 @@ void _showOwnerProductDialog(
 }
 
 Widget _darkInput(String label, TextEditingController c,
-    {TextInputType type = TextInputType.text}) {
+    {TextInputType type = TextInputType.text, ValueChanged<String>? onChanged}) {
   return TextField(
     controller: c,
     keyboardType: type,
+    onChanged: onChanged,
     style: const TextStyle(color: Colors.white, fontSize: 13),
     decoration: InputDecoration(
       labelText: label,

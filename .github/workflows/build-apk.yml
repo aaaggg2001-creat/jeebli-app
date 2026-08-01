@@ -1,4 +1,4 @@
-name: Build APK
+name: Build & Release APK
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.6'
+          flutter-version: '3.32.2'
           channel: 'stable'
 
       - name: Install dependencies
@@ -31,9 +31,30 @@ jobs:
       - name: Build APK (Release)
         run: flutter build apk --release
 
-      - name: Upload APK
+      - name: Get version
+        id: version
+        run: echo "version=$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "جيبلي ديلفري - نسخة ${{ steps.version.outputs.version }}"
+          body: |
+            ## ✅ نسخة جديدة من تطبيق جيبلي ديلفري
+            
+            ### كيفية التثبيت:
+            1. حمّل ملف `jeebli-release.apk` من الأسفل.
+            2. افتح الملف على هاتفك الأندرويد وثبّته.
+            3. تمتع بالتطبيق! 🚀
+          files: build/app/outputs/flutter-apk/app-release.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APK as Artifact (backup)
         uses: actions/upload-artifact@v4
         with:
           name: jeebli-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 7
+          retention-days: 30

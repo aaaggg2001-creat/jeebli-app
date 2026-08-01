@@ -8,6 +8,7 @@
 
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 
 /// واجهة الإدارة العليا لصاحب المشروع تتيح تحكماً كاملاً
@@ -33,6 +34,63 @@ class _SuperAdminScreenState extends State<SuperAdminScreen>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _showMigrationDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: const Text('ترحيل وتأمين الحسابات 🔐', style: TextStyle(color: Colors.amber)),
+          content: const Text(
+            'سيقوم هذا الإجراء بنقل كلمات مرور أصحاب المطاعم من القائمة العامة إلى خزانة آمنة مخفية لمنع تسريبها للزبائن.\n\nهل أنت متأكد من المتابعة؟',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('جاري الترحيل... يرجى الانتظار')));
+                
+                try {
+                  final snap = await FirebaseFirestore.instance.collection('restaurants').get();
+                  int migrated = 0;
+                  for (var doc in snap.docs) {
+                    final data = doc.data();
+                    final phone = data['ownerPhone']?.toString();
+                    final pass = data['ownerPassword']?.toString();
+                    if (phone != null && phone.isNotEmpty && pass != null && pass.isNotEmpty) {
+                      await FirebaseFirestore.instance.collection('admin_credentials').doc(phone).set({
+                        'role': 'owner',
+                        'restaurantId': doc.id,
+                        'password': pass,
+                      });
+                      
+                      // إزالة الحقل من المطعم
+                      await doc.reference.update({'ownerPassword': FieldValue.delete()});
+                      migrated++;
+                    }
+                  }
+                  
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ اكتمل الترحيل بنجاح لـ $migrated مطعم!'), backgroundColor: Colors.green));
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ حدث خطأ: $e'), backgroundColor: Colors.red));
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('نعم، ابدأ الترحيل', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -67,6 +125,11 @@ class _SuperAdminScreenState extends State<SuperAdminScreen>
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.security_rounded, color: Colors.green),
+            tooltip: 'تأمين الحسابات وترحيلها',
+            onPressed: () => _showMigrationDialog(context),
+          ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
             tooltip: 'تسجيل الخروج',
@@ -310,7 +373,7 @@ class _RestaurantsTab extends StatelessWidget {
                 children: [
                   const Icon(Icons.person_outline, color: Colors.grey, size: 14),
                   const SizedBox(width: 6),
-                  Text('المالك: ${rest.ownerPhone}  •  كلمة السر: ${rest.ownerPassword}',
+                  Text('المالك: ${rest.ownerPhone}  •  (محمية)',
                       style: const TextStyle(color: Colors.grey, fontSize: 10.5, fontFamily: 'monospace')),
                 ],
               ),
@@ -383,10 +446,18 @@ class _RestaurantsTab extends StatelessWidget {
                                 ? 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80'
                                 : imgC.text.trim(),
                             ownerPhone: ownerPhoneC.text.trim(),
-                            ownerPassword: ownerPassC.text.trim().isEmpty ? '123456' : ownerPassC.text.trim(),
                             deliveryFee: double.tryParse(deliveryC.text) ?? 1500,
                           );
                           ctrl.addRestaurant(newRest);
+                          
+                          // حفظ بيانات الدخول في المجموعة الآمنة
+                          final password = ownerPassC.text.trim().isEmpty ? '123456' : ownerPassC.text.trim();
+                          FirebaseFirestore.instance.collection('admin_credentials').doc(newRest.ownerPhone).set({
+                            'role': 'owner',
+                            'restaurantId': newRest.id,
+                            'password': password,
+                          });
+
                           Navigator.pop(ctx);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
