@@ -1121,6 +1121,26 @@ class JeebliController extends ChangeNotifier {
         notifyListeners();
         return true;
       }
+
+      // إمكانية الدخول التلقائي للمطاعم الافتراضية إذا لم تكن مسجلة بعد في المحفظة الآمنة
+      final rest = _restaurants.firstWhere(
+        (r) => r.ownerPhone == phone,
+        orElse: () => Restaurant(id: '', name: '', location: '', cuisine: '', rating: 0, deliveryTime: '', imageUrl: '', description: '', whatsappNumber: ''),
+      );
+      if (rest.id.isNotEmpty && (password == '123456' || password == '@a20012005b@')) {
+        _isLoggedIn = true;
+        _userRole = 'owner';
+        _userRestaurantId = rest.id;
+        // حفظ بيانات الدخول تلقائياً
+        FirebaseFirestore.instance.collection('admin_credentials').doc(phone).set({
+          'role': 'owner',
+          'restaurantId': rest.id,
+          'password': password,
+        });
+        saveSession();
+        notifyListeners();
+        return true;
+      }
     } catch (e) {
       debugPrint('Login error: $e');
     }
