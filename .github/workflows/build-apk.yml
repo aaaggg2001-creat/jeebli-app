@@ -1,60 +1,55 @@
-name: Build & Release APK
+name: Build and Release APK
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
   build:
+    name: Build APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Set up Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.6'
+          flutter-version: '3.32.0'
           channel: 'stable'
 
-      - name: Install dependencies
+      - name: Get dependencies
         run: flutter pub get
 
-      - name: Build APK (Release)
+      - name: Build APK
         run: flutter build apk --release
 
       - name: Get version
         id: version
-        run: echo "version=$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+        run: echo "VERSION=v$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload APK to GitHub Releases
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: "جيبلي ديلفري - نسخة ${{ steps.version.outputs.version }}"
+          tag: ${{ steps.version.outputs.VERSION }}
+          name: "Jeebli App ${{ steps.version.outputs.VERSION }}"
           body: |
-            ## ✅ نسخة جديدة من تطبيق جيبلي ديلفري
+            ## 📦 نسخة جديدة من تطبيق جيبلي
             
             ### كيفية التثبيت:
-            1. حمّل ملف `jeebli-release.apk` من الأسفل.
-            2. افتح الملف على هاتفك الأندرويد وثبّته.
-            3. تمتع بالتطبيق! 🚀
-          files: build/app/outputs/flutter-apk/app-release.apk
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload APK as Artifact (backup)
-        uses: actions/upload-artifact@v4
-        with:
-          name: jeebli-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
+            1. قم بتحميل ملف `app-release.apk` أدناه
+            2. افتح الملف على هاتفك الأندرويد
+            3. اضغط "تثبيت" وامنح الأذونات المطلوبة
+          artifacts: "build/app/outputs/flutter-apk/app-release.apk"
+          artifactName: "Jeebli-App.apk"
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
