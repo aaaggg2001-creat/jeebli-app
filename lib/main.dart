@@ -946,32 +946,9 @@ class JeebliController extends ChangeNotifier {
   List<AppNotification> notifications = [];
   int unreadNotifications = 0;
 
-  // --- Promo Code ---
-  String _appliedPromoCode = '';
-  double _promoDiscount = 0.0;
-  String get appliedPromoCode => _appliedPromoCode;
-  double get promoDiscount => _promoDiscount;
-
-  bool applyPromoCode(String code) {
-    final Map<String, double> validCodes = {
-      'JEEBLI10': 0.10,
-      'JEEBLI20': 0.20,
-      'WELCOME': 0.15,
-      'JEEBLI50': 0.50,
-    };
-    final upper = code.trim().toUpperCase();
-    if (validCodes.containsKey(upper)) {
-      _appliedPromoCode = upper;
-      _promoDiscount = subtotal * validCodes[upper]!;
-      notifyListeners();
-      return true;
-    }
-    return false;
-  }
-
-  void removePromoCode() {
-    _appliedPromoCode = '';
-    _promoDiscount = 0.0;
+  void clearNotifications() {
+    notifications.clear();
+    unreadNotifications = 0;
     notifyListeners();
   }
 
@@ -2689,10 +2666,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
         actions: [
           if (controller.notifications.isNotEmpty)
             TextButton(
-              onPressed: () {
-                controller.notifications.clear();
-                controller.notifyListeners();
-              },
+              onPressed: () => controller.clearNotifications(),
               child: const Text('مسح الكل',
                   style: TextStyle(color: Colors.redAccent, fontSize: 12)),
             ),
@@ -5415,7 +5389,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, color: Colors.white)),
             ]),
-            if (controller.promoDiscount > 0) ...[
+            if (controller.appliedPromoDiscount > 0) ...[
               const SizedBox(height: 6),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                 Row(children: [
@@ -5426,7 +5400,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       style: const TextStyle(
                           color: Colors.greenAccent, fontSize: 12)),
                 ]),
-                Text('- ${controller.promoDiscount.toStringAsFixed(0)} د.ع',
+                Text('- ${controller.appliedPromoDiscount.toStringAsFixed(0)} د.ع',
                     style: const TextStyle(
                         color: Colors.greenAccent,
                         fontWeight: FontWeight.bold)),
@@ -5438,7 +5412,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   style: TextStyle(
                       fontWeight: FontWeight.bold, color: Colors.white)),
               Text(
-                '${(controller.totalAmount - controller.promoDiscount).clamp(0, double.infinity).toStringAsFixed(0)} د.ع',
+                '${controller.totalAmount.toStringAsFixed(0)} د.ع',
                 style: const TextStyle(
                     color: Color(0xFFFF8F00),
                     fontWeight: FontWeight.bold,
@@ -5451,8 +5425,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  Widget _buildPromoCodeWidget(JeebliController controller) =>
-      _PromoCodeField(controller: controller);
+
 
   void _showWhatsAppConfirmationDialog(
       BuildContext context, JeebliController controller) {
@@ -5549,7 +5522,6 @@ class _PromoCodeField extends StatefulWidget {
 class _PromoCodeFieldState extends State<_PromoCodeField> {
   final _promoController = TextEditingController();
   String? _promoError;
-  bool _promoSuccess = false;
 
   @override
   void dispose() {
@@ -5560,16 +5532,16 @@ class _PromoCodeFieldState extends State<_PromoCodeField> {
   void _apply() {
     final code = _promoController.text.trim();
     if (code.isEmpty) return;
-    final success = widget.controller.applyPromoCode(code);
+    final result = widget.controller.applyPromoCode(code);
+    final success = result == 'تم تطبيق الخصم بنجاح!';
     setState(() {
-      _promoSuccess = success;
-      _promoError = success ? null : '❌ الكود غير صحيح أو منتهي الصلاحية';
+      _promoError = success ? null : '❌ $result';
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasCode = widget.controller.appliedPromoCode.isNotEmpty;
+    final hasCode = widget.controller.appliedPromoCode?.isNotEmpty == true;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
