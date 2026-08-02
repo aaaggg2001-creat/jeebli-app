@@ -7053,11 +7053,15 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   'driverPhone': dPhone,
                                                   'acceptedAt': FieldValue.serverTimestamp(),
                                                 });
-                                                jeebliNotifications.showOrderNotification(
-                                                  title: '✅ تم قبول طلبك!',
-                                                  body: 'طلبك قيد التحضير الآن 👨‍🍳 المندوب $dName في طريقه قريباً!',
-                                                  id: index + 2000,
-                                                );
+                                                
+                                                // إنشاء حساب تلقائي للمندوب ليتمكن من تسجيل الدخول (كلمة السر الافتراضية: 123456)
+                                                await FirebaseFirestore.instance.collection('drivers').doc(dPhone).set({
+                                                  'name': dName,
+                                                  'phone': dPhone,
+                                                  'password': '123456',
+                                                  'createdAt': FieldValue.serverTimestamp(),
+                                                }, SetOptions(merge: true));
+
                                                 if (ctx.mounted) Navigator.pop(ctx);
                                               },
                                               icon: const Icon(Icons.delivery_dining_rounded, size: 16),
