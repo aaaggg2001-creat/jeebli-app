@@ -907,9 +907,71 @@ class JeebliController extends ChangeNotifier {
   String streetDetails = '';
   String orderNotes = '';
   String? activeOrderId; // معرّف الطلب النشط للزبون لمتابعته حياً
+  StreamSubscription<DocumentSnapshot>? _activeOrderSubscription; // مستمع الطلب النشط
+  String? _lastKnownOrderStatus; // لمنع تكرار الإشعارات عند فتح التطبيق
   bool isLocating = false;
   double? customerLat;
   double? customerLng;
+
+  /// ═══ المستمع الذكي للزبون - يرصد تغيرات حالة طلبه فوراً ويرسل إشعاراً خاصاً به ═══
+  void startCustomerOrderListener(String orderId) {
+    _activeOrderSubscription?.cancel();
+    _lastKnownOrderStatus = null;
+    activeOrderId = orderId;
+    _activeOrderSubscription = FirebaseFirestore.instance
+        .collection('orders')
+        .doc(orderId)
+        .snapshots()
+        .listen((doc) {
+      if (!doc.exists) return;
+      final data = doc.data() as Map<String, dynamic>;
+      final newStatus = data['status'] as String? ?? 'pending';
+      if (newStatus == _lastKnownOrderStatus) return; // لا تحديث
+      final prevStatus = _lastKnownOrderStatus;
+      _lastKnownOrderStatus = newStatus;
+      if (prevStatus == null) return; // تجاهل أول قراءة عند الفتح لمنع الإشعار المكرر
+      // ═══ إرسال الإشعار للزبون حسب الحالة الجديدة ═══
+      String title = '';
+      String body = '';
+      switch (newStatus) {
+        case 'preparing':
+          title = '👨‍🍳 قبل المطعم طلبك!';
+          body = 'مطعمك بدأ بتحضير وجبتك الآن. استعد!';
+          break;
+        case 'onTheWay':
+          final driverName = data['driverName'] ?? '';
+          title = '🛵 طلبك قادم إليك!';
+          body = driverName.isNotEmpty
+              ? 'المندوب $driverName استلم وجبتك وهو في الطريق إليك!'
+              : 'المندوب استلم وجبتك وهو في الطريق إليك!';
+          break;
+        case 'delivered':
+          title = '✅ تم استلام طلبك!';
+          body = 'تم توصيل وجبتك بنجاح. ألف صحة وعافية ❤️';
+          _stopCustomerOrderListener(); // أنهِ الاستماع بعد التسليم
+          break;
+        case 'rejected':
+          title = '❌ تم رفض طلبك';
+          body = 'نأسف، قام المطعم برفض طلبك. يمكنك تجربة مطعم آخر.';
+          _stopCustomerOrderListener();
+          break;
+        default:
+          return;
+      }
+      _addNotification('$title $body');
+      jeebliNotifications.showOrderNotification(
+        id: orderId.hashCode,
+        title: title,
+        body: body,
+      );
+      notifyListeners();
+    }, onError: (e) => debugPrint('Order listener error: $e'));
+  }
+
+  void _stopCustomerOrderListener() {
+    _activeOrderSubscription?.cancel();
+    _activeOrderSubscription = null;
+  }
 
   Future<bool> detectLocation() async {
     isLocating = true;
@@ -1478,50 +1540,7 @@ class JeebliController extends ChangeNotifier {
   int get cartCount => _cartItems.fold(0, (s, i) => s + i.quantity);
   double get subtotal => _cartItems.fold(0.0, (s, i) => s + i.totalPrice);
   
-  // --- Promo Code ---
-  final TextEditingController promoCodeController = TextEditingController();
-  String? _appliedPromoCode;
-  double _appliedPromoDiscount = 0.0;
-  String? get appliedPromoCode => _appliedPromoCode;
-  double get appliedPromoDiscount => _appliedPromoDiscount;
-
-  String applyPromoCode(String code) {
-    if (code.isEmpty) return 'يرجى إدخال كود الخصم';
-    if (_appliedPromoCode == code) return 'تم تطبيق هذا الكود مسبقاً';
-    
-    final offer = _offers.firstWhere((o) => o.promoCode == code && o.isActive, orElse: () => Offer(id: '', restaurantId: '', restaurantName: '', title: '', description: '', discountTag: '', imageUrl: ''));
-    
-    if (offer.id.isEmpty) return 'كود الخصم غير صحيح أو منتهي الصلاحية';
-    if (cartRestaurantId != null && offer.restaurantId.isNotEmpty && offer.restaurantId != cartRestaurantId) {
-      return 'كود الخصم هذا غير صالح للمطعم الحالي';
-    }
-
-    double discount = 0.0;
-    if (offer.discountTag.contains('%')) {
-      final match = RegExp(r'\d+').firstMatch(offer.discountTag);
-      if (match != null) {
-        final percent = double.parse(match.group(0)!);
-        discount = subtotal * (percent / 100);
-      }
-    } else if (offer.discountTag.contains('مجاني')) {
-      discount = deliveryFee;
-    } else {
-      discount = 2000.0; // خصم افتراضي
-    }
-
-    _appliedPromoCode = code;
-    _appliedPromoDiscount = discount;
-    notifyListeners();
-    return 'تم تطبيق الخصم بنجاح!';
-  }
-
-  void removePromoCode() {
-    _appliedPromoCode = null;
-    _appliedPromoDiscount = 0.0;
-    notifyListeners();
-  }
-
-  double get totalAmount => (subtotal + deliveryFee - loyaltyDiscount - appliedPromoDiscount).clamp(0.0, double.infinity);
+  double get totalAmount => (subtotal + deliveryFee - loyaltyDiscount).clamp(0.0, double.infinity);
 
   void addToCart(Product product, BuildContext context) {
     if (!product.isAvailable) return;
@@ -1597,8 +1616,6 @@ class JeebliController extends ChangeNotifier {
 
   void clearCart() {
     _cartItems.clear();
-    _appliedPromoCode = null;
-    _appliedPromoDiscount = 0.0;
     notifyListeners();
   }
 
@@ -1764,8 +1781,6 @@ $itemsText
         'subtotal': subtotal,
         'deliveryFee': deliveryFee,
         'totalAmount': totalAmount,
-        'promoCode': appliedPromoCode ?? '',
-        'promoDiscount': appliedPromoDiscount,
         'neighborhood': selectedNeighborhood,
         'streetDetails': streetDetails,
         'status': 'pending',
@@ -1774,6 +1789,8 @@ $itemsText
         'createdAt': FieldValue.serverTimestamp(),
       });
       activeOrderId = orderId; // حفظ المعرّف لمتابعة الطلب حياً
+      // ★ ابدأ الاستماع لتغييرات هذا الطلب وأرسل الإشعار للزبون حصراً
+      startCustomerOrderListener(orderId);
       debugPrint('✅ تم حفظ الطلب في Firestore: $orderId');
     } catch (e) {
       debugPrint('❌ خطأ في حفظ الطلب: $e');
@@ -3995,12 +4012,8 @@ class DriverDashboardScreen extends StatelessWidget {
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: () async {
+                                  // تحديث الحالة في Firestore - سيصل الإشعار للزبون تلقائياً عبر المستمع الخاص به
                                   await docRef.update({'status': 'onTheWay'});
-                                  jeebliNotifications.showOrderNotification(
-                                    title: '🛵 المندوب في الطريق!',
-                                    body: 'المندوب ${data['driverName'] ?? ''} استلم طلبك وهو في الطريق إليك الآن!',
-                                    id: index + 3000,
-                                  );
                                 },
                                 icon: const Icon(Icons.delivery_dining_rounded),
                                 label: const Text('استلمت الوجبة وأنا في الطريق 🛵'),
@@ -4018,15 +4031,11 @@ class DriverDashboardScreen extends StatelessWidget {
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: () async {
+                                  // تحديث الحالة في Firestore - سيصل الإشعار للزبون تلقائياً عبر المستمع الخاص به
                                   await docRef.update({
                                     'status': 'delivered',
                                     'deliveredAt': FieldValue.serverTimestamp(),
                                   });
-                                  jeebliNotifications.showOrderNotification(
-                                    title: '✅ تم تسليم الطلب!',
-                                    body: 'تم تسليم طلبك بنجاح! ألف عافية ❤️',
-                                    id: index + 4000,
-                                  );
                                 },
                                 icon: const Icon(Icons.check_circle_rounded),
                                 label: const Text('تم التسليم للزبون ✅'),
@@ -4712,16 +4721,7 @@ class CartScreen extends StatelessWidget {
                       fontWeight: FontWeight.bold, color: Colors.greenAccent)),
             ]),
           ],
-          if (controller.appliedPromoDiscount > 0) ...[
-            const SizedBox(height: 6),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('🎟️ خصم كود الترويجي',
-                  style: TextStyle(color: Colors.amberAccent, fontSize: 12.5, fontWeight: FontWeight.bold)),
-              Text('-${controller.appliedPromoDiscount.toStringAsFixed(0)} د.ع',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, color: Colors.amberAccent)),
-            ]),
-          ],
+
           if (controller.loyaltySystemEnabled) ...[
             const SizedBox(height: 10),
             // ── كارت استبدال النقاط ──
@@ -4788,64 +4788,7 @@ class CartScreen extends StatelessWidget {
           ),
           ],
           const SizedBox(height: 16),
-          // ── حقل الكود الترويجي ──
-          if (controller.appliedPromoCode == null)
-            Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 45,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: TextField(
-                      controller: controller.promoCodeController,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
-                      decoration: const InputDecoration(
-                        hintText: 'أدخل كود الخصم (إن وجد)',
-                        hintStyle: TextStyle(color: Colors.white38, fontSize: 12),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () {
-                    final msg = controller.applyPromoCode(controller.promoCodeController.text.trim());
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(msg),
-                      backgroundColor: msg.contains('بنجاح') ? Colors.green : Colors.redAccent,
-                    ));
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('تطبيق', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            )
-          else
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('الكود المستخدم: ${controller.appliedPromoCode}',
-                    style: const TextStyle(color: Colors.amber, fontSize: 12)),
-                TextButton(
-                  onPressed: () {
-                    controller.removePromoCode();
-                    controller.promoCodeController.clear();
-                  },
-                  child: const Text('إزالة', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
-                ),
-              ],
-            ),
-          const SizedBox(height: 16),
+          // Promo code removed
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             const Text('المبلغ الكلي',
                 style: TextStyle(
@@ -5378,9 +5321,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget _buildOrderSummaryCard(JeebliController controller) {
     return Column(
       children: [
-        // --- حقل كود الخصم ---
-        _PromoCodeField(controller: controller),
-        const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -5403,23 +5343,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, color: Colors.white)),
             ]),
-            if (controller.appliedPromoDiscount > 0) ...[
-              const SizedBox(height: 6),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Row(children: [
-                  const Icon(Icons.local_offer_rounded,
-                      color: Colors.greenAccent, size: 14),
-                  const SizedBox(width: 4),
-                  Text('خصم كود ${controller.appliedPromoCode}',
-                      style: const TextStyle(
-                          color: Colors.greenAccent, fontSize: 12)),
-                ]),
-                Text('- ${controller.appliedPromoDiscount.toStringAsFixed(0)} د.ع',
-                    style: const TextStyle(
-                        color: Colors.greenAccent,
-                        fontWeight: FontWeight.bold)),
-              ]),
-            ],
             const Divider(height: 18, color: Colors.white12),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               const Text('الإجمالي الكلي',
@@ -5524,158 +5447,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 }
 
-/// ويدجت حقل إدخال كود الخصم
-class _PromoCodeField extends StatefulWidget {
-  final JeebliController controller;
-  const _PromoCodeField({required this.controller});
 
-  @override
-  State<_PromoCodeField> createState() => _PromoCodeFieldState();
-}
-
-class _PromoCodeFieldState extends State<_PromoCodeField> {
-  final _promoController = TextEditingController();
-  String? _promoError;
-
-  @override
-  void dispose() {
-    _promoController.dispose();
-    super.dispose();
-  }
-
-  void _apply() {
-    final code = _promoController.text.trim();
-    if (code.isEmpty) return;
-    final result = widget.controller.applyPromoCode(code);
-    final success = result == 'تم تطبيق الخصم بنجاح!';
-    setState(() {
-      _promoError = success ? null : '❌ $result';
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasCode = widget.controller.appliedPromoCode?.isNotEmpty == true;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: hasCode
-            ? Colors.green.withOpacity(0.08)
-            : const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: hasCode
-              ? Colors.greenAccent.withOpacity(0.4)
-              : Colors.white.withOpacity(0.07),
-        ),
-      ),
-      child: hasCode
-          ? Row(
-              children: [
-                const Icon(Icons.check_circle_rounded,
-                    color: Colors.greenAccent, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'تم تطبيق كود ${widget.controller.appliedPromoCode} 🎉',
-                    style: const TextStyle(
-                        color: Colors.greenAccent,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () {
-                    widget.controller.removePromoCode();
-                    _promoController.clear();
-                    setState(() {
-                      _promoError = null;
-                    });
-                  },
-                  child: const Icon(Icons.close, color: Colors.white38, size: 18),
-                ),
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _promoController,
-                        textDirection: TextDirection.ltr,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            letterSpacing: 1.2),
-                        decoration: InputDecoration(
-                          hintText: 'أدخل كود الخصم',
-                          hintStyle: const TextStyle(
-                              color: Colors.white38, fontSize: 12),
-                          prefixIcon: const Icon(Icons.local_offer_outlined,
-                              color: Color(0xFFFF8F00), size: 18),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                          isDense: true,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide:
-                                BorderSide(color: Colors.white.withOpacity(0.1)),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide:
-                                BorderSide(color: Colors.white.withOpacity(0.1)),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                                color: Color(0xFFFF8F00), width: 1.5),
-                          ),
-                          filled: true,
-                          fillColor: Colors.white.withOpacity(0.05),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: _apply,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF8F00),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                        minimumSize: Size.zero,
-                      ),
-                      child: const Text('تطبيق',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 12)),
-                    ),
-                  ],
-                ),
-                if (_promoError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6, right: 4),
-                    child: Text(_promoError!,
-                        style: const TextStyle(
-                            color: Colors.redAccent, fontSize: 11)),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 6, right: 4),
-                  child: Text(
-                    '💡 جرب: JEEBLI10 للخصم 10%  |  WELCOME للخصم 15%',
-                    style:
-                        TextStyle(color: Colors.white38, fontSize: 10),
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-}
 
 /// ============================================================================
 /// 10. شاشة التتبع الحي
@@ -7637,14 +7409,14 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
           children: [
             Icon(Icons.vpn_key_rounded, color: Colors.amber, size: 24),
             SizedBox(width: 8),
-            Text('دخول الإدارة وأصحاب المطاعم 🔑',
+            Text('بوابة المطاعم والمندوبين 🛵',
                 style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('سجّل دخولك لمتابعة لوحة تحكم مطعمك أو إدارة التطبيق:',
+            const Text('سجّل دخولك لمتابعة مطعمك أو استلام طلباتك كمندوب توصيل:',
                 style: TextStyle(color: Colors.white70, fontSize: 12)),
             const SizedBox(height: 14),
             TextField(
