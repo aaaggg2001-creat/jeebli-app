@@ -1401,49 +1401,42 @@ class JeebliController extends ChangeNotifier {
       return true;
     }
 
-    // 2. فحص المندوبين أولاً (ليكون مستقلاً تماماً)
-    try {
-      final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(phone).get();
-      debugPrint('🔍 Driver doc exists: ${driverDoc.exists}, password match: ${driverDoc.data()?['password'] == password}');
-      if (driverDoc.exists && driverDoc.data()?['password'] == password) {
-        final dData = driverDoc.data()!;
-        _isLoggedIn = true;
-        _userRole = 'driver';
-        _userEmailOrPhone = phone;
-        customerName = dData['name'] ?? 'المندوب';
-        customerPhone = phone;
-        saveSession();
-        _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
-        notifyListeners();
-        return true;
-      }
-    } catch (e) {
-      debugPrint('Driver login error: $e');
-    }
-
-    // 3. فحص أصحاب المطاعم
+    // فحص قاعدة البيانات الموحدة للمدراء والمندوبين
     try {
       final doc = await FirebaseFirestore.instance.collection('admin_credentials').doc(phone).get();
       if (doc.exists && doc.data()?['password'] == password) {
         final data = doc.data()!;
-        _isLoggedIn = true;
         _userRole = data['role'] ?? 'owner';
+        
         if (_userRole == 'owner') {
           _userRestaurantId = data['restaurantId'];
-          // التحقق مما إذا كان المطعم معطلاً من قبل الإدارة
           final rest = _restaurants.firstWhere((r) => r.id == _userRestaurantId, orElse: () => _restaurants.first);
           if (rest.id.isNotEmpty && !rest.isActive) {
             _isLoggedIn = false;
             _userRole = 'customer';
             _userRestaurantId = null;
-            return false; // لا يمكن الدخول لأن المطعم معطل
+            return false;
           }
+          _isLoggedIn = true;
+          saveSession();
+          notifyListeners();
+          return true;
+        } else if (_userRole == 'driver') {
+          _isLoggedIn = true;
+          _userEmailOrPhone = phone;
+          customerName = data['name'] ?? 'المندوب';
+          customerPhone = phone;
+          saveSession();
+          _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
+          notifyListeners();
+          return true;
         } else {
+          _isLoggedIn = true;
           _userRestaurantId = null;
+          saveSession();
+          notifyListeners();
+          return true;
         }
-        saveSession();
-        notifyListeners();
-        return true;
       }
 
       // 4. إمكانية الدخول التلقائي للمطاعم الافتراضية
@@ -2002,47 +1995,49 @@ $itemsText
         return true;
       }
 
-      // فحص أصحاب المطاعم ديناميكياً
+      // فحص قاعدة البيانات الموحدة للمدراء والمندوبين
       try {
         final doc = await FirebaseFirestore.instance.collection('admin_credentials').doc(idNormalized).get();
         if (doc.exists && doc.data()?['password'] == password) {
           final data = doc.data()!;
-          _isLoggedIn = true;
           _userRole = data['role'] ?? 'owner';
-          _userEmailOrPhone = idNormalized;
+          
           if (_userRole == 'owner') {
             _userRestaurantId = data['restaurantId'];
             final rest = _restaurants.firstWhere((r) => r.id == _userRestaurantId, orElse: () => _restaurants.first);
+            if (rest.id.isNotEmpty && !rest.isActive) {
+              _isLoggedIn = false;
+              _userRole = 'customer';
+              _userRestaurantId = null;
+              return false;
+            }
+            _isLoggedIn = true;
+            _userEmailOrPhone = idNormalized;
+            saveSession();
             _addNotification('🏪 مرحباً بك! تم تسجيل دخولك كمالك لـ ${rest.name}', isOwnerNotification: true);
+            notifyListeners();
+            return true;
+          } else if (_userRole == 'driver') {
+            _isLoggedIn = true;
+            _userEmailOrPhone = idNormalized;
+            customerName = data['name'] ?? 'المندوب';
+            customerPhone = idNormalized;
+            saveSession();
+            _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
+            notifyListeners();
+            return true;
           } else {
+            _isLoggedIn = true;
             _userRestaurantId = null;
+            _userEmailOrPhone = idNormalized;
+            saveSession();
             _addNotification('🔑 مرحباً بك في لوحة الإدارة العليا!');
+            notifyListeners();
+            return true;
           }
-          saveSession();
-          notifyListeners();
-          return true;
         }
       } catch (e) {
         debugPrint('Admin credentials login error: $e');
-      }
-
-      // فحص المندوبين من Firestore
-      try {
-        final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(idNormalized).get();
-        if (driverDoc.exists && driverDoc.data()?['password'] == password) {
-          final dData = driverDoc.data()!;
-          _isLoggedIn = true;
-          _userRole = 'driver';
-          _userEmailOrPhone = idNormalized;
-          customerName = dData['name'] ?? 'المندوب';
-          customerPhone = idNormalized;
-          saveSession();
-          _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
-          notifyListeners();
-          return true;
-        }
-      } catch (e) {
-        debugPrint('Driver login error: $e');
       }
     }
 
@@ -6962,6 +6957,43 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold)),
                             ),
+                            const SizedBox(width: 6),
+                            InkWell(
+                              onTap: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => Directionality(
+                                    textDirection: TextDirection.rtl,
+                                    child: AlertDialog(
+                                      backgroundColor: const Color(0xFF1E293B),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      title: const Text('تأكيد الحذف', style: TextStyle(color: Colors.white)),
+                                      content: const Text('هل أنت متأكد من حذف هذا الطلب نهائياً؟', style: TextStyle(color: Colors.white70)),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+                                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف', style: TextStyle(color: Colors.redAccent))),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  await docs[index].reference.delete();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('تم حذف الطلب بنجاح 🗑️'), backgroundColor: Colors.redAccent),
+                                    );
+                                  }
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent.withOpacity(0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -7113,12 +7145,12 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   'acceptedAt': FieldValue.serverTimestamp(),
                                                 });
                                                 
-                                                // إنشاء حساب للمندوب
-                                                await FirebaseFirestore.instance.collection('drivers').doc(dPhone).set({
+                                                // إنشاء حساب للمندوب في قاعدة البيانات الموحدة
+                                                await FirebaseFirestore.instance.collection('admin_credentials').doc(dPhone).set({
+                                                  'role': 'driver',
                                                   'name': dName,
                                                   'phone': dPhone,
                                                   'password': dPass,
-                                                  'createdAt': FieldValue.serverTimestamp(),
                                                 }, SetOptions(merge: true));
 
                                                 if (ctx.mounted) {
