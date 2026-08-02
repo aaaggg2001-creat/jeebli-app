@@ -777,10 +777,26 @@ class JeebliController extends ChangeNotifier {
         }
       }, onError: (e) => debugPrint('Firestore products sync note: $e'));
 
+      bool isFirstOffersLoad = true;
       // ═══ مزامنة العروض ═══
       firestore.collection('offers').snapshots().listen((snapshot) {
         final firestoreIds = snapshot.docs.map((d) => d.id).toSet();
         _offers.removeWhere((o) => !firestoreIds.contains(o.id));
+
+        for (var change in snapshot.docChanges) {
+          if (change.type == DocumentChangeType.added && !isFirstOffersLoad) {
+            final o = Offer.fromMap(change.doc.data() as Map<String, dynamic>, change.doc.id);
+            if (o.isActive) {
+              _addNotification('🎉 عرض جديد من ${o.restaurantName}: ${o.title} - ${o.discountTag}');
+              jeebliNotifications.showOrderNotification(
+                id: o.id.hashCode,
+                title: 'عرض جديد من ${o.restaurantName}!',
+                body: '${o.title} - ${o.discountTag}',
+              );
+            }
+          }
+        }
+
         for (var doc in snapshot.docs) {
           final o = Offer.fromMap(doc.data(), doc.id);
           final idx = _offers.indexWhere((item) => item.id == o.id);
@@ -790,6 +806,8 @@ class JeebliController extends ChangeNotifier {
             _offers.add(o);
           }
         }
+        
+        isFirstOffersLoad = false;
         _saveLocalData();
         notifyListeners();
       }, onError: (e) => debugPrint('Firestore offers sync note: $e'));
@@ -6940,12 +6958,10 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                     ),
                     IconButton(
                       icon: const Icon(Icons.photo_library, color: Colors.amber),
-                      onPressed: () async {
-                        final picker = ImagePicker();
-                        final picked = await picker.pickImage(source: ImageSource.gallery);
-                        if (picked != null) {
-                          imgC.text = picked.path;
-                        }
+                      onPressed: () {
+                        showImagePickerOptions(context, (pathOrUrl) {
+                          imgC.text = pathOrUrl;
+                        });
                       },
                     ),
                   ],
