@@ -1762,6 +1762,12 @@ $itemsText
     // Save customer name and phone in session for future orders
     saveSession();
 
+    return true;
+  }
+
+  Future<void> completeOrderAndResetHome() async {
+    _addNotification('✅ تم إرسال طلبك بنجاح! يتم الآن تجهيزه في المطعم.');
+    
     // 📦 حفظ الطلب في Firestore تحت collection 'orders'
     try {
       final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
@@ -1796,11 +1802,6 @@ $itemsText
       debugPrint('❌ خطأ في حفظ الطلب: $e');
     }
 
-    return true;
-  }
-
-  void completeOrderAndResetHome() {
-    _addNotification('✅ تم إرسال طلبك بنجاح! يتم الآن تجهيزه في المطعم.');
     if (_cartItems.isNotEmpty) {
       // احفظ الطلب في التاريخ
       _pastOrders.insert(
@@ -5409,9 +5410,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   style: TextStyle(color: Colors.white54, fontSize: 12)),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.pop(ctx);
-                controller.completeOrderAndResetHome();
+                await controller.completeOrderAndResetHome();
+                if (!context.mounted) return;
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(
