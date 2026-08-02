@@ -2786,7 +2786,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
     {'name': 'وجبات سريعة', 'icon': Icons.fastfood_rounded, 'keywords': ['برجر', 'بيتزا', 'فنجر', 'وجبات', 'سريعة']},
     {'name': 'مشويات', 'icon': Icons.kebab_dining_rounded, 'keywords': ['كباب', 'مشويات', 'تكة', 'شقف']},
     {'name': 'أسماك', 'icon': Icons.set_meal_rounded, 'keywords': ['سمك', 'مسكوف', 'أسماك', 'بحرية']},
-    {'name': 'دجاج وشاورما', 'icon': Icons.local_fire_department_rounded, 'keywords': ['دجاج', 'شاورما', 'قص', 'زنجر', 'دياي']},
+    {'name': 'دجاج شوي', 'icon': Icons.local_fire_department_rounded, 'keywords': ['دجاج', 'شوي', 'دجاج شوي', 'دياي']},
     {'name': 'فلافل', 'icon': Icons.breakfast_dining_rounded, 'keywords': ['فلافل', 'مقبلات']},
     {'name': 'حلويات وعصائر', 'icon': Icons.icecream_rounded, 'keywords': ['حلويات', 'عصير', 'عصائر', 'كيك', 'مرطبات', 'كريب', 'وافل']},
   ];

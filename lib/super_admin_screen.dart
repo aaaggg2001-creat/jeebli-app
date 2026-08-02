@@ -395,10 +395,21 @@ class _RestaurantsTab extends StatelessWidget {
     final ownerPhoneC = TextEditingController();
     final ownerPassC = TextEditingController();
     final deliveryC = TextEditingController(text: '1500');
+    String selectedCategory = 'الكل';
+    final List<String> availableCategories = [
+      'الكل',
+      'وجبات سريعة',
+      'مشويات',
+      'أسماك',
+      'دجاج شوي',
+      'فلافل',
+      'حلويات وعصائر'
+    ];
 
     showDialog(
       context: context,
-      builder: (ctx) => Directionality(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => Directionality(
         textDirection: TextDirection.rtl,
         child: Dialog(
           backgroundColor: const Color(0xFF1E293B),
@@ -414,6 +425,36 @@ class _RestaurantsTab extends StatelessWidget {
                 const SizedBox(height: 16),
                 _darkField('اسم المطعم *', nameC, Icons.store),
                 _darkField('المنطقة (مثل: الهاشمية، بابل)', locationC, Icons.location_on_outlined),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: selectedCategory,
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF1E293B),
+                      icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFFF8F00)),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Tajawal'),
+                      items: availableCategories.map((String value) {
+                        return DropdownMenuItem<String>(
+                          value: value,
+                          child: Text('القسم: $value'),
+                        );
+                      }).toList(),
+                      onChanged: (newValue) {
+                        if (newValue != null) {
+                          setDialogState(() => selectedCategory = newValue);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 _darkField('أنواع الوجبات (مثل: برجر • شاورما)', cuisineC, Icons.restaurant_menu),
                 _darkField('رابط صورة المطعم', imgC, Icons.image_outlined),
                 _darkField('وصف قصير للمطعم', descC, Icons.description_outlined),
@@ -438,7 +479,7 @@ class _RestaurantsTab extends StatelessWidget {
                             id: 'rest_${DateTime.now().millisecondsSinceEpoch}',
                             name: nameC.text.trim(),
                             location: locationC.text.trim().isEmpty ? 'الهاشمية، بابل' : locationC.text.trim(),
-                            cuisine: cuisineC.text.trim().isEmpty ? 'وجبات متنوعة' : cuisineC.text.trim(),
+                            cuisine: '${cuisineC.text.trim().isEmpty ? 'وجبات متنوعة' : cuisineC.text.trim()}${selectedCategory != 'الكل' ? ' • $selectedCategory' : ''}',
                             rating: 4.5,
                             deliveryTime: '20-35 دقيقة',
                             description: descC.text.trim().isEmpty ? 'مطعم مميز في الهاشمية' : descC.text.trim(),
@@ -479,6 +520,7 @@ class _RestaurantsTab extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }
