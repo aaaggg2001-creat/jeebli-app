@@ -1765,9 +1765,7 @@ $itemsText
   }
 
   void completeOrderAndResetHome() {
-    final earned = (subtotal / 1000).floor() * 10;
-    _addNotification(
-        '✅ تم إرسال طلبك عبر الواتساب!${earned > 0 ? ' كسبت $earned نقطة 🌟' : ''}');
+    _addNotification('✅ تم إرسال طلبك بنجاح! يتم الآن تجهيزه في المطعم.');
     if (_cartItems.isNotEmpty) {
       // احفظ الطلب في التاريخ
       _pastOrders.insert(
@@ -1781,8 +1779,6 @@ $itemsText
           date: DateTime.now(),
         ),
       );
-      // اكسب النقاط
-      earnPoints(subtotal);
       // اخصم النقاط المستخدمة
       if (_redeemingPoints && _loyaltyPoints >= pointsPerReward) {
         _loyaltyPoints -= pointsPerReward;
@@ -7037,8 +7033,6 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             stream: FirebaseFirestore.instance
                 .collection('orders')
                 .where('restaurantId', isEqualTo: myId)
-                .orderBy('createdAt', descending: true)
-                .limit(10)
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -7049,7 +7043,25 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                           color: Color(0xFFFF8F00), strokeWidth: 2)),
                 );
               }
-              final docs = snapshot.data?.docs ?? [];
+              var docs = snapshot.data?.docs ?? [];
+              
+              // ترتيب تنازلي حسب وقت الإنشاء برمجياً لتجنب مشاكل الـ Index في فايربيس
+              docs.sort((a, b) {
+                final dataA = a.data() as Map<String, dynamic>;
+                final dataB = b.data() as Map<String, dynamic>;
+                final timeA = dataA['createdAt'] as Timestamp?;
+                final timeB = dataB['createdAt'] as Timestamp?;
+                if (timeA == null && timeB == null) return 0;
+                if (timeA == null) return 1;
+                if (timeB == null) return -1;
+                return timeB.compareTo(timeA);
+              });
+              
+              // عرض أحدث 15 طلب فقط
+              if (docs.length > 15) {
+                docs = docs.take(15).toList();
+              }
+
               if (docs.isEmpty) {
                 return const Padding(
                   padding: EdgeInsets.all(20),
