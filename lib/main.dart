@@ -1392,6 +1392,7 @@ class JeebliController extends ChangeNotifier {
   }
 
   Future<bool> loginOwnerOrAdmin(String phone, String password) async {
+    // 1. سوبر أدمن
     if (phone == '07802019730' && password == '@a20012005b@') {
       _isLoggedIn = true;
       _userRole = 'superadmin';
@@ -1400,6 +1401,27 @@ class JeebliController extends ChangeNotifier {
       return true;
     }
 
+    // 2. فحص المندوبين أولاً (ليكون مستقلاً تماماً)
+    try {
+      final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(phone).get();
+      debugPrint('🔍 Driver doc exists: ${driverDoc.exists}, password match: ${driverDoc.data()?['password'] == password}');
+      if (driverDoc.exists && driverDoc.data()?['password'] == password) {
+        final dData = driverDoc.data()!;
+        _isLoggedIn = true;
+        _userRole = 'driver';
+        _userEmailOrPhone = phone;
+        customerName = dData['name'] ?? 'المندوب';
+        customerPhone = phone;
+        saveSession();
+        _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Driver login error: $e');
+    }
+
+    // 3. فحص أصحاب المطاعم
     try {
       final doc = await FirebaseFirestore.instance.collection('admin_credentials').doc(phone).get();
       if (doc.exists && doc.data()?['password'] == password) {
@@ -1424,33 +1446,16 @@ class JeebliController extends ChangeNotifier {
         return true;
       }
 
-      // فحص المندوبين من Firestore
-      final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(phone).get();
-      if (driverDoc.exists && driverDoc.data()?['password'] == password) {
-        final dData = driverDoc.data()!;
-        _isLoggedIn = true;
-        _userRole = 'driver';
-        _userEmailOrPhone = phone;
-        customerName = dData['name'] ?? 'المندوب';
-        customerPhone = phone;
-        saveSession();
-        _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
-        notifyListeners();
-        return true;
-      }
-
-      // إمكانية الدخول التلقائي للمطاعم الافتراضية إذا لم تكن مسجلة بعد في المحفظة الآمنة
+      // 4. إمكانية الدخول التلقائي للمطاعم الافتراضية
       final rest = _restaurants.firstWhere(
         (r) => r.ownerPhone == phone,
         orElse: () => Restaurant(id: '', name: '', location: '', cuisine: '', rating: 0, deliveryTime: '', imageUrl: '', description: '', whatsappNumber: ''),
       );
       if (rest.id.isNotEmpty && (password == '123456' || password == '@a20012005b@')) {
-        if (!rest.isActive) return false; // منع الدخول إذا كان معطلاً
-        
+        if (!rest.isActive) return false;
         _isLoggedIn = true;
         _userRole = 'owner';
         _userRestaurantId = rest.id;
-        // حفظ بيانات الدخول تلقائياً
         FirebaseFirestore.instance.collection('admin_credentials').doc(phone).set({
           'role': 'owner',
           'restaurantId': rest.id,
@@ -1466,6 +1471,7 @@ class JeebliController extends ChangeNotifier {
 
     return false;
   }
+
 
   void updateDeliveryFee(String restaurantId, double fee) {
     final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
