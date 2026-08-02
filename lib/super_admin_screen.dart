@@ -328,6 +328,7 @@ class _RestaurantsTab extends StatelessWidget {
                 if (val == 'toggle') ctrl.toggleRestaurantActive(rest.id);
                 if (val == 'delete') _showDeleteRestaurantDialog(context, ctrl, rest);
                 if (val == 'delivery') _showEditDeliveryDialog(context, ctrl, rest);
+                if (val == 'edit_creds') _showEditCredentialsDialog(context, ctrl, rest);
               },
               itemBuilder: (_) => [
                 PopupMenuItem(
@@ -346,6 +347,15 @@ class _RestaurantsTab extends StatelessWidget {
                     const Icon(Icons.delivery_dining, color: Colors.amber, size: 18),
                     const SizedBox(width: 8),
                     const Text('تعديل سعر التوصيل',
+                        style: TextStyle(color: Colors.white, fontSize: 13)),
+                  ]),
+                ),
+                PopupMenuItem(
+                  value: 'edit_creds',
+                  child: Row(children: [
+                    const Icon(Icons.lock_reset_rounded, color: Colors.blueAccent, size: 18),
+                    const SizedBox(width: 8),
+                    const Text('تغيير رقم وكلمة سر المطعم',
                         style: TextStyle(color: Colors.white, fontSize: 13)),
                   ]),
                 ),
@@ -521,6 +531,79 @@ class _RestaurantsTab extends StatelessWidget {
           ),
         ),
       ),
+      ),
+    );
+  }
+
+  void _showEditCredentialsDialog(BuildContext context, JeebliController ctrl, Restaurant rest) {
+    final phoneC = TextEditingController(text: rest.ownerPhone);
+    final passC = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('تغيير بيانات الدخول', style: TextStyle(color: Colors.white, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('قم بتغيير رقم الهاتف أو كلمة السر الخاصة بصاحب المطعم:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const SizedBox(height: 16),
+              _darkField('رقم الهاتف', phoneC, Icons.phone),
+              const SizedBox(height: 12),
+              _darkField('كلمة السر الجديدة', passC, Icons.lock),
+              const SizedBox(height: 8),
+              const Text('ملاحظة: عند تغيير الرقم سيتم نقل ملكية المطعم إلى الرقم الجديد. إذا تركت كلمة السر فارغة ستكون 123456.', style: TextStyle(color: Colors.orangeAccent, fontSize: 10)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newPhone = phoneC.text.trim();
+                final newPass = passC.text.trim().isEmpty ? '123456' : passC.text.trim();
+                if (newPhone.isEmpty) return;
+
+                // 1. Delete old credentials if phone changed
+                if (rest.ownerPhone != null && rest.ownerPhone != newPhone && rest.ownerPhone!.isNotEmpty) {
+                  await FirebaseFirestore.instance.collection('admin_credentials').doc(rest.ownerPhone).delete();
+                }
+
+                // 2. Set new credentials
+                await FirebaseFirestore.instance.collection('admin_credentials').doc(newPhone).set({
+                  'role': 'owner',
+                  'restaurantId': rest.id,
+                  'password': newPass,
+                });
+
+                // 3. Update restaurant document
+                await FirebaseFirestore.instance.collection('restaurants').doc(rest.id).update({
+                  'ownerPhone': newPhone,
+                });
+
+                // 4. Update local object
+                rest.ownerPhone = newPhone;
+                // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
+                ctrl.notifyListeners();
+
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('✅ تم تغيير بيانات الدخول بنجاح!'), backgroundColor: Colors.green),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),
+              child: const Text('حفظ التغييرات', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
     );
   }

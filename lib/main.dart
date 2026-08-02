@@ -1408,10 +1408,33 @@ class JeebliController extends ChangeNotifier {
         _userRole = data['role'] ?? 'owner';
         if (_userRole == 'owner') {
           _userRestaurantId = data['restaurantId'];
+          // التحقق مما إذا كان المطعم معطلاً من قبل الإدارة
+          final rest = _restaurants.firstWhere((r) => r.id == _userRestaurantId, orElse: () => _restaurants.first);
+          if (rest.id.isNotEmpty && !rest.isActive) {
+            _isLoggedIn = false;
+            _userRole = 'customer';
+            _userRestaurantId = null;
+            return false; // لا يمكن الدخول لأن المطعم معطل
+          }
         } else {
           _userRestaurantId = null;
         }
         saveSession();
+        notifyListeners();
+        return true;
+      }
+
+      // فحص المندوبين من Firestore
+      final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(phone).get();
+      if (driverDoc.exists && driverDoc.data()?['password'] == password) {
+        final dData = driverDoc.data()!;
+        _isLoggedIn = true;
+        _userRole = 'driver';
+        _userEmailOrPhone = phone;
+        customerName = dData['name'] ?? 'المندوب';
+        customerPhone = phone;
+        saveSession();
+        _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
         notifyListeners();
         return true;
       }
@@ -1422,6 +1445,8 @@ class JeebliController extends ChangeNotifier {
         orElse: () => Restaurant(id: '', name: '', location: '', cuisine: '', rating: 0, deliveryTime: '', imageUrl: '', description: '', whatsappNumber: ''),
       );
       if (rest.id.isNotEmpty && (password == '123456' || password == '@a20012005b@')) {
+        if (!rest.isActive) return false; // منع الدخول إذا كان معطلاً
+        
         _isLoggedIn = true;
         _userRole = 'owner';
         _userRestaurantId = rest.id;
@@ -2922,7 +2947,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
               r.cuisine.contains(_searchQuery) ||
               r.description.contains(_searchQuery);
           final matchesCat = _matchesCategory(r, _selectedCategory);
-          return matchesSearch && matchesCat;
+          return matchesSearch && matchesCat && r.isActive;
         }).toList();
 
         return SafeArea(
@@ -7090,7 +7115,15 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   'createdAt': FieldValue.serverTimestamp(),
                                                 }, SetOptions(merge: true));
 
-                                                if (ctx.mounted) Navigator.pop(ctx);
+                                                if (ctx.mounted) {
+                                                  Navigator.pop(ctx);
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text('✅ تم تعيين المندوب بنجاح!'),
+                                                      backgroundColor: Colors.green,
+                                                    ),
+                                                  );
+                                                }
                                               },
                                               icon: const Icon(Icons.delivery_dining_rounded, size: 16),
                                               label: const Text('قبول وتعيين المندوب'),
