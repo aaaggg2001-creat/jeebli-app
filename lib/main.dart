@@ -6946,6 +6946,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                   onPressed: () async {
                                     final driverNameCtrl = TextEditingController();
                                     final driverPhoneCtrl = TextEditingController();
+                                    final driverPassCtrl = TextEditingController(text: '123456');
                                     final docRef = docs[index].reference;
                                     final customerName2 = data['customerName'] ?? '';
                                     await showDialog(
@@ -7028,9 +7029,35 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   ),
                                                 ),
                                               ),
-                                              const SizedBox(height: 4),
+                                              const SizedBox(height: 12),
+                                              TextField(
+                                                controller: driverPassCtrl,
+                                                style: const TextStyle(color: Colors.white),
+                                                textDirection: TextDirection.ltr,
+                                                decoration: InputDecoration(
+                                                  hintText: 'كلمة سر المندوب',
+                                                  hintStyle: const TextStyle(color: Colors.white38),
+                                                  prefixIcon: const Icon(Icons.lock_rounded, color: Color(0xFFFF8F00), size: 18),
+                                                  filled: true,
+                                                  fillColor: Colors.white.withOpacity(0.05),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                                                  ),
+                                                  enabledBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                                                  ),
+                                                  focusedBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    borderSide: const BorderSide(color: Color(0xFFFF8F00)),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
                                               const Text(
-                                                'سيتم إرسال الطلب لهذا المندوب فوراً',
+                                                'سيتم إرسال الطلب لهذا المندوب فوراً وإنشاء حساب له إذا لم يكن موجوداً.',
+                                                textAlign: TextAlign.center,
                                                 style: TextStyle(color: Colors.white38, fontSize: 10),
                                               ),
                                             ],
@@ -7046,7 +7073,8 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                               onPressed: () async {
                                                 final dName = driverNameCtrl.text.trim();
                                                 final dPhone = driverPhoneCtrl.text.trim();
-                                                if (dName.isEmpty || dPhone.isEmpty) return;
+                                                final dPass = driverPassCtrl.text.trim();
+                                                if (dName.isEmpty || dPhone.isEmpty || dPass.isEmpty) return;
                                                 await docRef.update({
                                                   'status': 'preparing',
                                                   'driverName': dName,
@@ -7054,11 +7082,11 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   'acceptedAt': FieldValue.serverTimestamp(),
                                                 });
                                                 
-                                                // إنشاء حساب تلقائي للمندوب ليتمكن من تسجيل الدخول (كلمة السر الافتراضية: 123456)
+                                                // إنشاء حساب للمندوب
                                                 await FirebaseFirestore.instance.collection('drivers').doc(dPhone).set({
                                                   'name': dName,
                                                   'phone': dPhone,
-                                                  'password': '123456',
+                                                  'password': dPass,
                                                   'createdAt': FieldValue.serverTimestamp(),
                                                 }, SetOptions(merge: true));
 
