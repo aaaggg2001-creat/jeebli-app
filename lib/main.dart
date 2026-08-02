@@ -3850,19 +3850,19 @@ class DriverDashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = JeebliProvider.of(context);
     final driverPhone = controller.customerPhone;
+    final driverName = controller.customerName;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E293B),
         elevation: 0,
-        centerTitle: true,
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
+        centerTitle: false,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.delivery_dining_rounded, color: Color(0xFFFF8F00), size: 24),
-            SizedBox(width: 8),
-            Text('واجهة المندوب', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            const Text('واجهة المندوب 🛵', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            Text('مرحباً $driverName', style: const TextStyle(color: Colors.white54, fontSize: 11)),
           ],
         ),
         actions: [
@@ -3877,14 +3877,24 @@ class DriverDashboardScreen extends StatelessWidget {
         stream: FirebaseFirestore.instance
             .collection('orders')
             .where('driverPhone', isEqualTo: driverPhone)
-            .orderBy('createdAt', descending: true)
-            .limit(10)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator(color: Color(0xFFFF8F00)));
           }
-          final docs = snapshot.data?.docs ?? [];
+          var docs = snapshot.data?.docs ?? [];
+
+          // ترتيب تنازلي برمجياً
+          docs.sort((a, b) {
+            final dataA = a.data() as Map<String, dynamic>;
+            final dataB = b.data() as Map<String, dynamic>;
+            final tA = dataA['createdAt'] as Timestamp?;
+            final tB = dataB['createdAt'] as Timestamp?;
+            if (tA == null && tB == null) return 0;
+            if (tA == null) return 1;
+            if (tB == null) return -1;
+            return tB.compareTo(tA);
+          });
 
           if (docs.isEmpty) {
             return Center(
@@ -3916,170 +3926,308 @@ class DriverDashboardScreen extends StatelessWidget {
               final data = docs[index].data() as Map<String, dynamic>;
               final docRef = docs[index].reference;
               final status = data['status'] ?? 'preparing';
-              final customerName = data['customerName'] ?? '---';
-              final customerPhone2 = data['customerPhone'] ?? '';
+              final custName = data['customerName'] ?? '---';
+              final custPhone = data['customerPhone'] ?? '';
               final neighborhood = data['neighborhood'] ?? '';
+              final streetDetails = data['streetDetails'] ?? '';
               final total = (data['totalAmount'] ?? 0).toStringAsFixed(0);
+              final deliveryFee = (data['deliveryFee'] ?? 0).toStringAsFixed(0);
               final restName = data['restaurantName'] ?? '';
+              final items = (data['items'] as List<dynamic>?) ?? [];
 
               Color statusColor;
               String statusLabel;
+              IconData statusIcon;
               switch (status) {
                 case 'preparing':
                   statusColor = Colors.amber;
-                  statusLabel = '🧑‍🍳 جاري التحضير';
+                  statusLabel = '🧑‍🍳 جاري التحضير في المطعم';
+                  statusIcon = Icons.restaurant_rounded;
                   break;
                 case 'onTheWay':
                   statusColor = Colors.lightBlueAccent;
-                  statusLabel = '🛵 في الطريق';
+                  statusLabel = '🛵 أنت في الطريق';
+                  statusIcon = Icons.delivery_dining_rounded;
                   break;
                 case 'delivered':
                   statusColor = Colors.greenAccent;
                   statusLabel = '✅ تم التسليم';
+                  statusIcon = Icons.check_circle_rounded;
                   break;
                 default:
                   statusColor = Colors.orangeAccent;
                   statusLabel = '⏳ انتظار';
+                  statusIcon = Icons.hourglass_top_rounded;
               }
 
               return Container(
-                margin: const EdgeInsets.only(bottom: 16),
+                margin: const EdgeInsets.only(bottom: 18),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E293B),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: statusColor.withOpacity(0.35), width: 1.5),
-                  boxShadow: [BoxShadow(color: statusColor.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4))],
+                  border: Border.all(color: statusColor.withOpacity(0.4), width: 1.5),
+                  boxShadow: [BoxShadow(color: statusColor.withOpacity(0.1), blurRadius: 16, offset: const Offset(0, 4))],
                 ),
                 child: Column(
                   children: [
-                    // ─── Header ───
+                    // ─── Header: حالة الطلب ───
                     Container(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [statusColor.withOpacity(0.12), Colors.transparent],
-                          begin: Alignment.topRight, end: Alignment.bottomLeft,
+                          colors: [statusColor.withOpacity(0.15), Colors.transparent],
+                          begin: Alignment.centerRight, end: Alignment.centerLeft,
                         ),
                         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                       ),
                       child: Row(
                         children: [
-                          CircleAvatar(
-                            radius: 22,
-                            backgroundColor: statusColor.withOpacity(0.15),
-                            child: Icon(Icons.person_rounded, color: statusColor, size: 24),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(customerName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                                Text(restName, style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                              ],
-                            ),
-                          ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: statusColor.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(20),
+                              shape: BoxShape.circle,
+                              color: statusColor.withOpacity(0.15),
                               border: Border.all(color: statusColor.withOpacity(0.4)),
                             ),
-                            child: Text(statusLabel, style: TextStyle(color: statusColor, fontSize: 10.5, fontWeight: FontWeight.bold)),
+                            child: Icon(statusIcon, color: statusColor, size: 20),
                           ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(statusLabel, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                          ),
+                          Text(restName, style: const TextStyle(color: Colors.white38, fontSize: 11)),
                         ],
                       ),
                     ),
                     const Divider(color: Colors.white10, height: 1),
-                    // ─── التفاصيل ───
+
+                    // ─── معلومات الزبون ───
                     Padding(
                       padding: const EdgeInsets.all(14),
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(children: [
-                            const Icon(Icons.location_on_rounded, color: Color(0xFFFF8F00), size: 16),
-                            const SizedBox(width: 6),
-                            Text('المنطقة: $neighborhood', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                            const Spacer(),
-                            const Icon(Icons.payments_rounded, color: Colors.greenAccent, size: 16),
-                            const SizedBox(width: 6),
-                            Text('$total د.ع', style: const TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-                          ]),
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            const Icon(Icons.phone_rounded, color: Colors.white38, size: 15),
-                            const SizedBox(width: 6),
-                            Text(customerPhone2, style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
-                            const Spacer(),
-                            GestureDetector(
-                              onTap: () async {
-                                final uri = Uri.parse('tel:$customerPhone2');
-                                if (await canLaunchUrl(uri)) launchUrl(uri);
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.07),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.white12),
-                                ),
-                                child: const Row(children: [
-                                  Icon(Icons.call_rounded, color: Colors.white54, size: 14),
-                                  SizedBox(width: 4),
-                                  Text('اتصال بالزبون', style: TextStyle(color: Colors.white54, fontSize: 11)),
-                                ]),
+                          // اسم الزبون
+                          Row(
+                            children: [
+                              const Icon(Icons.person_rounded, color: Color(0xFFFF8F00), size: 18),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(custName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                               ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+
+                          // رقم الهاتف + زر اتصال
+                          Row(
+                            children: [
+                              const Icon(Icons.phone_rounded, color: Colors.white38, size: 16),
+                              const SizedBox(width: 8),
+                              Text(custPhone, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                              const Spacer(),
+                              GestureDetector(
+                                onTap: () async {
+                                  final uri = Uri.parse('tel:$custPhone');
+                                  if (await canLaunchUrl(uri)) launchUrl(uri);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.greenAccent.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.greenAccent.withOpacity(0.4)),
+                                  ),
+                                  child: const Row(children: [
+                                    Icon(Icons.call_rounded, color: Colors.greenAccent, size: 14),
+                                    SizedBox(width: 4),
+                                    Text('اتصال', style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  ]),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+
+                          // العنوان
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white10),
                             ),
-                          ]),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.location_on_rounded, color: Color(0xFFFF8F00), size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('المنطقة: $neighborhood', style: const TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.bold)),
+                                      if (streetDetails.isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Text(streetDetails, style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // ─── قائمة الوجبات ───
+                          const Text('📋 تفاصيل الطلب:', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 6),
+                          ...items.map((item) {
+                            final iMap = item as Map<String, dynamic>;
+                            final iName = iMap['name'] ?? '';
+                            final iQty = iMap['qty'] ?? 1;
+                            final iPrice = (iMap['price'] ?? 0).toStringAsFixed(0);
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 22, height: 22,
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFF8F00).withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text('$iQty', style: const TextStyle(color: Color(0xFFFF8F00), fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(iName, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                  ),
+                                  Text('$iPrice د.ع', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                                ],
+                              ),
+                            );
+                          }),
+
+                          const SizedBox(height: 8),
+                          const Divider(color: Colors.white10),
+
+                          // ─── المبلغ الإجمالي ───
+                          Row(
+                            children: [
+                              const Text('رسوم التوصيل:', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                              const Spacer(),
+                              Text('$deliveryFee د.ع', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(Icons.payments_rounded, color: Colors.greenAccent, size: 18),
+                              const SizedBox(width: 6),
+                              const Text('المبلغ الكلي المطلوب:', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.greenAccent.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: Colors.greenAccent.withOpacity(0.4)),
+                                ),
+                                child: Text('$total د.ع', style: const TextStyle(color: Colors.greenAccent, fontSize: 14, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+
                           const SizedBox(height: 14),
+
                           // ─── أزرار الإجراء ───
                           if (status == 'preparing')
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: () async {
-                                  // تحديث الحالة في Firestore - سيصل الإشعار للزبون تلقائياً عبر المستمع الخاص به
                                   await docRef.update({'status': 'onTheWay'});
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('🛵 تم تأكيد استلام الطلب! أنت الآن في الطريق'), backgroundColor: Colors.amber),
+                                    );
+                                  }
                                 },
-                                icon: const Icon(Icons.delivery_dining_rounded),
-                                label: const Text('استلمت الوجبة وأنا في الطريق 🛵'),
+                                icon: const Icon(Icons.delivery_dining_rounded, size: 20),
+                                label: const Text('✅ استلمت الطلب من المطعم - أنا في الطريق!'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.amber,
                                   foregroundColor: Colors.black,
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  padding: const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                   textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                 ),
                               ),
                             ),
-                          if (status == 'onTheWay')
+
+                          if (status == 'onTheWay') ...[
+                            // تذكير بالعنوان
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              margin: const EdgeInsets.only(bottom: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.lightBlueAccent.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.3)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.navigation_rounded, color: Colors.lightBlueAccent, size: 16),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'اتجه إلى: $neighborhood${streetDetails.isNotEmpty ? " - $streetDetails" : ""}',
+                                      style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 11.5),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: () async {
-                                  // تحديث الحالة في Firestore - سيصل الإشعار للزبون تلقائياً عبر المستمع الخاص به
                                   await docRef.update({
                                     'status': 'delivered',
                                     'deliveredAt': FieldValue.serverTimestamp(),
                                   });
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('✅ تم تسليم الطلب بنجاح!'), backgroundColor: Colors.green),
+                                    );
+                                  }
                                 },
-                                icon: const Icon(Icons.check_circle_rounded),
-                                label: const Text('تم التسليم للزبون ✅'),
+                                icon: const Icon(Icons.check_circle_rounded, size: 20),
+                                label: const Text('📍 وصلت وسلمت الطلب للزبون ✅'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.greenAccent,
                                   foregroundColor: Colors.black,
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  padding: const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                   textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                 ),
                               ),
                             ),
+                          ],
+
                           if (status == 'delivered')
                             Container(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                               alignment: Alignment.center,
-                              child: const Text('✅ تم إنهاء هذا الطلب بنجاح', style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
+                              child: const Column(
+                                children: [
+                                  Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 32),
+                                  SizedBox(height: 4),
+                                  Text('✅ تم إنهاء هذا الطلب بنجاح', style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                                ],
+                              ),
                             ),
                         ],
                       ),
@@ -4093,7 +4241,7 @@ class DriverDashboardScreen extends StatelessWidget {
       ),
     );
   }
-}
+
 
 /// ============================================================================
 /// 7. شاشة منيو المطعم
