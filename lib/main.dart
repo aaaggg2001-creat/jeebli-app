@@ -437,6 +437,20 @@ class CartItem {
   int quantity;
   CartItem({required this.product, this.quantity = 1});
   double get totalPrice => (product.discountPrice ?? product.price) * quantity;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'product': product.toMap(),
+      'quantity': quantity,
+    };
+  }
+
+  factory CartItem.fromMap(Map<String, dynamic> map) {
+    return CartItem(
+      product: Product.fromMap(map['product'] as Map<String, dynamic>, map['product']['id'] ?? ''),
+      quantity: map['quantity'] ?? 1,
+    );
+  }
 }
 
 class Category {
@@ -1878,9 +1892,10 @@ $itemsText
   Future<void> completeOrderAndResetHome() async {
     _addNotification('✅ تم إرسال طلبك بنجاح! يتم الآن تجهيزه في المطعم.');
     
+    final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
+    
     // 📦 حفظ الطلب في Firestore تحت collection 'orders'
     try {
-      final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
       await FirebaseFirestore.instance.collection('orders').doc(orderId).set({
         'orderId': orderId,
         'deviceUid': deviceUid,
@@ -8346,9 +8361,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
         ? controller.customerName
         : 'زبون جيب لي';
     final phone = controller.customerPhone;
-    final location = controller.selectedNeighborhood.isNotEmpty
-        ? controller.selectedNeighborhood
-        : 'لم يُحدد بعد';
     final orderCount = controller.pastOrders.length;
 
     return Scaffold(
@@ -8810,38 +8822,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     );
   }
 
-  Widget _buildInfoTile(IconData icon, String title, String value,
-      {Color? color}) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-              color: (color ?? const Color(0xFFFF8F00)).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon,
-              color: color ?? const Color(0xFFFF8F00), size: 18),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 11, color: Colors.white54)),
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white),
-                  overflow: TextOverflow.ellipsis),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
 
   Widget _buildSettingsTile(IconData icon, String label, Color color,
       {bool isDestructive = false, required VoidCallback onTap}) {
