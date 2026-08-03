@@ -627,6 +627,10 @@ enum PaymentMethod { cod, mastercard }
 class JeebliController extends ChangeNotifier {
   bool _isOffline = false;
   bool get isOffline => _isOffline;
+
+  /// ═══ مؤشر تحميل الجلسة — يمنع عرض الشاشات قبل قراءة SharedPreferences ═══
+  bool _isSessionLoading = true;
+  bool get isSessionLoading => _isSessionLoading;
   
   StreamSubscription? _connectivitySubscription;
 
@@ -634,7 +638,7 @@ class JeebliController extends ChangeNotifier {
     _initConnectivity();
     _loadLocalData().then((_) {
       _initFirebaseSync();
-      _loadSavedSession();
+      _loadSavedSession(); // ستضع _isSessionLoading = false عند الانتهاء
     });
   }
 
@@ -659,6 +663,7 @@ class JeebliController extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       
+      // ── تحميل/إنشاء معرّف الجهاز الفريد ─────────────────────────
       String? savedUid = prefs.getString('device_uid');
       if (savedUid == null || savedUid.isEmpty) {
         savedUid = const Uuid().v4();
@@ -666,22 +671,32 @@ class JeebliController extends ChangeNotifier {
       }
       deviceUid = savedUid;
 
+      // ── تحميل بيانات الجلسة كاملة ───────────────────────────────
       final loggedIn = prefs.getBool('is_logged_in') ?? false;
       if (loggedIn) {
         _isLoggedIn = true;
         _userRole = prefs.getString('user_role');
         customerName = prefs.getString('customer_name') ?? '';
         customerPhone = prefs.getString('customer_phone') ?? '';
+        customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
         _userRestaurantId = prefs.getString('user_restaurant_id');
+        // بيانات التوصيل المحفوظة
+        selectedNeighborhood = prefs.getString('selected_neighborhood') ?? '';
+        streetDetails = prefs.getString('street_details') ?? '';
+        _userEmailOrPhone = prefs.getString('user_email_or_phone');
+      } else {
+        // حتى لو غير مسجل: نُحمّل الأفاتار فقط
+        customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
       }
-      customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
       
-      // بمجرد تحميل المعرف، سنقوم بجلب أي طلبات نشطة له للاستماع لها فوراً
+      // بمجرد تحميل المعرف، نجلب الطلبات النشطة للاستماع لها فوراً
       _recoverActiveOrders();
-      
-      notifyListeners();
     } catch (e) {
       debugPrint('Session load note: $e');
+    } finally {
+      // ✅ انتهى التحميل — أعلم الـ UI ليعرض الشاشة الصحيحة
+      _isSessionLoading = false;
+      notifyListeners();
     }
   }
 
@@ -694,7 +709,11 @@ class JeebliController extends ChangeNotifier {
       await prefs.setString('customer_name', customerName);
       await prefs.setString('customer_phone', customerPhone);
       await prefs.setString('customer_avatar_url', customerAvatarUrl);
+      // بيانات التوصيل
+      await prefs.setString('selected_neighborhood', selectedNeighborhood);
+      await prefs.setString('street_details', streetDetails);
       if (_userRestaurantId != null) await prefs.setString('user_restaurant_id', _userRestaurantId!);
+      if (_userEmailOrPhone != null) await prefs.setString('user_email_or_phone', _userEmailOrPhone!);
     } catch (e) {
       debugPrint('Session save note: $e');
     }
@@ -709,6 +728,9 @@ class JeebliController extends ChangeNotifier {
       await prefs.remove('customer_name');
       await prefs.remove('customer_phone');
       await prefs.remove('user_restaurant_id');
+      await prefs.remove('user_email_or_phone');
+      await prefs.remove('selected_neighborhood');
+      await prefs.remove('street_details');
     } catch (e) {
       debugPrint('Session clear note: $e');
     }
@@ -2669,6 +2691,52 @@ class AppRouteNavigator extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = JeebliProvider.of(context);
 
+    // ═══ انتظر حتى تنتهي قراءة SharedPreferences ═══
+    if (controller.isSessionLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0F172A),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFF8F00), Color(0xFFE65100)],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFFF8F00).withOpacity(0.4),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.fastfood_rounded, color: Colors.white, size: 42),
+              ),
+              const SizedBox(height: 24),
+              const SizedBox(
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(
+                  color: Color(0xFFFF8F00),
+                  strokeWidth: 2.5,
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'جاري تحميل بياناتك...',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     if (controller.userRole == 'superadmin') {
       return const SuperAdminShell();
     }
@@ -3961,11 +4029,50 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
 }
 
 /// ============================================================================
-/// واجهة المندوب (Driver Dashboard)
+/// واجهة المندوب (Driver Dashboard) - تحديثات فورية + إشعار عند طلب جديد
 /// ============================================================================
 
-class DriverDashboardScreen extends StatelessWidget {
+class DriverDashboardScreen extends StatefulWidget {
   const DriverDashboardScreen({super.key});
+
+  @override
+  State<DriverDashboardScreen> createState() => _DriverDashboardScreenState();
+}
+
+class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
+  int _prevOrderCount = -1; // -1 = أول تحميل، لا نُرسل إشعاراً
+
+  void _checkForNewOrders(int currentCount, String driverName) {
+    if (_prevOrderCount == -1) {
+      // أول تحميل — فقط احفظ العدد
+      _prevOrderCount = currentCount;
+      return;
+    }
+    if (currentCount > _prevOrderCount) {
+      // 🔔 طلب جديد وصل!
+      jeebliNotifications.showOrderNotification(
+        id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        title: '🛵 لديك طلب توصيل جديد!',
+        body: 'وصل طلب جديد إليك $driverName — افتح التطبيق لقبوله',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(children: [
+              Icon(Icons.delivery_dining_rounded, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(child: Text('🔔 طلب جديد وصل إليك! اضغط هنا للاطلاع عليه')),
+            ]),
+            backgroundColor: const Color(0xFFFF8F00),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+    _prevOrderCount = currentCount;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3987,6 +4094,22 @@ class DriverDashboardScreen extends StatelessWidget {
           ],
         ),
         actions: [
+          // مؤشر الاتصال المباشر
+          Container(
+            margin: const EdgeInsets.only(left: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.greenAccent.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.greenAccent.withOpacity(0.4)),
+            ),
+            child: const Row(children: [
+              Icon(Icons.circle, color: Colors.greenAccent, size: 8),
+              SizedBox(width: 4),
+              Text('مباشر', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+            ]),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.white54),
             onPressed: () => controller.logout(),
@@ -4000,7 +4123,7 @@ class DriverDashboardScreen extends StatelessWidget {
             .where('driverPhone', isEqualTo: driverPhone)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState == ConnectionState.waiting && _prevOrderCount == -1) {
             return const Center(child: CircularProgressIndicator(color: Color(0xFFFF8F00)));
           }
           var docs = snapshot.data?.docs ?? [];
@@ -4015,6 +4138,11 @@ class DriverDashboardScreen extends StatelessWidget {
             if (tA == null) return 1;
             if (tB == null) return -1;
             return tB.compareTo(tA);
+          });
+
+          // 🔔 تحقق من الطلبات الجديدة
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _checkForNewOrders(docs.length, driverName);
           });
 
           if (docs.isEmpty) {
@@ -4035,6 +4163,20 @@ class DriverDashboardScreen extends StatelessWidget {
                   const Text('لا توجد طلبات مسندة إليك الآن', style: TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   const Text('ستظهر هنا الطلبات عند تعيينك من قبل المطعم', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.greenAccent.withOpacity(0.3)),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.wifi_rounded, color: Colors.greenAccent, size: 14),
+                      SizedBox(width: 6),
+                      Text('متصل وينتظر الطلبات...', style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                    ]),
+                  ),
                 ],
               ),
             );
@@ -4055,6 +4197,15 @@ class DriverDashboardScreen extends StatelessWidget {
               final deliveryFee = (data['deliveryFee'] ?? 0).toStringAsFixed(0);
               final restName = data['restaurantName'] ?? '';
               final items = (data['items'] as List<dynamic>?) ?? [];
+              // 📍 إحداثيات الزبون (إذا وجدت)
+              final custLat = data['customerLat'];
+              final custLng = data['customerLng'];
+              final hasLocation = custLat != null && custLng != null;
+              // ⏰ وقت الطلب
+              final createdAt = data['createdAt'] as Timestamp?;
+              final orderTime = createdAt != null
+                  ? '${createdAt.toDate().hour}:${createdAt.toDate().minute.toString().padLeft(2, '0')}'
+                  : '';
 
               Color statusColor;
               String statusLabel;
@@ -4091,7 +4242,7 @@ class DriverDashboardScreen extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    // ─── Header: حالة الطلب ───
+                    // ─── Header: حالة الطلب + الوقت ───
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
@@ -4116,6 +4267,16 @@ class DriverDashboardScreen extends StatelessWidget {
                           Expanded(
                             child: Text(statusLabel, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 13)),
                           ),
+                          if (orderTime.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.06),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text('⏰ $orderTime', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                            ),
+                          const SizedBox(width: 6),
                           Text(restName, style: const TextStyle(color: Colors.white38, fontSize: 11)),
                         ],
                       ),
@@ -4170,7 +4331,7 @@ class DriverDashboardScreen extends StatelessWidget {
                           ),
                           const SizedBox(height: 8),
 
-                          // العنوان
+                          // العنوان + زر الخريطة
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
@@ -4178,23 +4339,52 @@ class DriverDashboardScreen extends StatelessWidget {
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(color: Colors.white10),
                             ),
-                            child: Row(
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.location_on_rounded, color: Color(0xFFFF8F00), size: 18),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('المنطقة: $neighborhood', style: const TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.bold)),
-                                      if (streetDetails.isNotEmpty) ...[
-                                        const SizedBox(height: 2),
-                                        Text(streetDetails, style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
-                                      ],
-                                    ],
-                                  ),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(Icons.location_on_rounded, color: Color(0xFFFF8F00), size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('المنطقة: $neighborhood', style: const TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.bold)),
+                                          if (streetDetails.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(streetDetails, style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                                // 📍 زر فتح الخريطة إذا توفرت الإحداثيات
+                                if (hasLocation) ...[
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () async {
+                                        final mapUri = Uri.parse(
+                                          'https://maps.google.com/?q=$custLat,$custLng',
+                                        );
+                                        if (await canLaunchUrl(mapUri)) {
+                                          launchUrl(mapUri, mode: LaunchMode.externalApplication);
+                                        }
+                                      },
+                                      icon: const Icon(Icons.map_rounded, size: 16, color: Color(0xFFFF8F00)),
+                                      label: const Text('📍 فتح موقع الزبون على الخريطة', style: TextStyle(color: Color(0xFFFF8F00), fontSize: 12, fontWeight: FontWeight.bold)),
+                                      style: OutlinedButton.styleFrom(
+                                        side: BorderSide(color: const Color(0xFFFF8F00).withOpacity(0.5)),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -4366,6 +4556,7 @@ class DriverDashboardScreen extends StatelessWidget {
 
 /// ============================================================================
 /// 7. شاشة منيو المطعم
+
 /// ============================================================================
 
 class RestaurantMenuScreen extends StatefulWidget {
