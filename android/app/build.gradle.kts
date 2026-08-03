@@ -10,7 +10,7 @@ android {
     buildToolsVersion = "34.0.0"
 
     compileOptions {
-        isCoreLibraryDesugaringEnabled = true
+        isCoreLibraryDesugaringEnabled = false
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -46,5 +46,4 @@ flutter {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
