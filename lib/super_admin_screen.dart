@@ -386,6 +386,12 @@ class _RestaurantsTab extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text('المالك: ${rest.ownerPhone}  •  (محمية)',
                       style: const TextStyle(color: Colors.grey, fontSize: 10.5, fontFamily: 'monospace')),
+                  const Spacer(),
+                  if (rest.joinedAt != null)
+                    Text(
+                      'انضم: ${rest.joinedAt!.day}/${rest.joinedAt!.month}/${rest.joinedAt!.year}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 10),
+                    ),
                 ],
               ),
             ),
@@ -499,7 +505,7 @@ class _RestaurantsTab extends StatelessWidget {
                                 : imgC.text.trim(),
                             ownerPhone: ownerPhoneC.text.trim(),
                             deliveryFee: double.tryParse(deliveryC.text) ?? 1500,
-                          );
+                          )..joinedAt = DateTime.now();
                           ctrl.addRestaurant(newRest);
                           
                           // حفظ بيانات الدخول في المجموعة الآمنة

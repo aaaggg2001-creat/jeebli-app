@@ -241,6 +241,8 @@ class Restaurant {
   double? restaurantLat;  // موقع المطعم
   double? restaurantLng;
 
+  DateTime? joinedAt;
+
   Restaurant({
     required this.id,
     required this.name,
@@ -291,6 +293,7 @@ class Restaurant {
 
   Map<String, dynamic> toMap() {
     return {
+      'joinedAt': joinedAt != null ? joinedAt!.toIso8601String() : FieldValue.serverTimestamp(),
       'id': id,
       'name': name,
       'location': location,
@@ -332,7 +335,11 @@ class Restaurant {
       closeHour: map['closeHour'] ?? 24,
       restaurantLat: map['restaurantLat'] != null ? (map['restaurantLat'] as num).toDouble() : null,
       restaurantLng: map['restaurantLng'] != null ? (map['restaurantLng'] as num).toDouble() : null,
-    );
+    )..joinedAt = map['joinedAt'] != null
+        ? (map['joinedAt'] is Timestamp
+            ? (map['joinedAt'] as Timestamp).toDate()
+            : DateTime.tryParse(map['joinedAt'].toString()))
+        : null;
   }
 
   /// حساب المسافة بالكيلومتر بين المطعم والزبون
@@ -455,6 +462,31 @@ class PastOrder {
     required this.totalAmount,
     required this.date,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'restaurantId': restaurantId,
+      'restaurantName': restaurantName,
+      'items': items.map((i) => i.toMap()).toList(),
+      'totalAmount': totalAmount,
+      'date': date.toIso8601String(),
+    };
+  }
+
+  factory PastOrder.fromMap(Map<String, dynamic> map) {
+    return PastOrder(
+      id: map['id'] ?? '',
+      restaurantId: map['restaurantId'] ?? '',
+      restaurantName: map['restaurantName'] ?? '',
+      items: (map['items'] as List<dynamic>?)
+              ?.map((i) => CartItem.fromMap(i as Map<String, dynamic>))
+              .toList() ??
+          [],
+      totalAmount: (map['totalAmount'] ?? 0.0).toDouble(),
+      date: DateTime.tryParse(map['date']?.toString() ?? '') ?? DateTime.now(),
+    );
+  }
 }
 
 class LoyaltyEntry {
@@ -686,6 +718,10 @@ class JeebliController extends ChangeNotifier {
       await prefs.setStringList('local_products', prodsJson);
       final offersJson = _offers.map((o) => jsonEncode(o.toMap())).toList();
       await prefs.setStringList('local_offers', offersJson);
+      final pastOrdersJson = pastOrders.map((o) => jsonEncode(o.toMap())).toList();
+      await prefs.setStringList('local_past_orders', pastOrdersJson);
+      final notificationsJson = notifications.map((n) => jsonEncode(n.toMap())).toList();
+      await prefs.setStringList('local_notifications', notificationsJson);
     } catch (e) {
       debugPrint('Local save note: $e');
     }
@@ -723,6 +759,22 @@ class JeebliController extends ChangeNotifier {
         }
       } else {
         _saveLocalData();
+      }
+      final pastOrdersJson = prefs.getStringList('local_past_orders') ?? [];
+      if (pastOrdersJson.isNotEmpty) {
+        pastOrders.clear();
+        for (var j in pastOrdersJson) {
+          final map = jsonDecode(j) as Map<String, dynamic>;
+          pastOrders.add(PastOrder.fromMap(map));
+        }
+      }
+      final notificationsJson = prefs.getStringList('local_notifications') ?? [];
+      if (notificationsJson.isNotEmpty) {
+        notifications.clear();
+        for (var j in notificationsJson) {
+          final map = jsonDecode(j) as Map<String, dynamic>;
+          notifications.add(AppNotification.fromMap(map));
+        }
       }
       notifyListeners();
     } catch (e) {
@@ -1721,6 +1773,7 @@ class JeebliController extends ChangeNotifier {
           isOwnerNotification: isOwnerNotification,
         ));
     unreadNotifications++;
+    _saveLocalData();
   }
 
   void markNotificationsRead() {
@@ -1865,7 +1918,7 @@ $itemsText
       _pastOrders.insert(
         0,
         PastOrder(
-          id: 'ORD-#${Random().nextInt(9000) + 1000}',
+          id: orderId,
           restaurantId: cartRestaurantId ?? 'akkala',
           restaurantName: _activeRestaurant?.name ?? 'مطعم أكّالة',
           items: _cartItems.map((i) => CartItem(product: i.product, quantity: i.quantity)).toList(),
@@ -1873,6 +1926,7 @@ $itemsText
           date: DateTime.now(),
         ),
       );
+      _saveLocalData();
       // اخصم النقاط المستخدمة
       if (_redeemingPoints && _loyaltyPoints >= pointsPerReward) {
         _loyaltyPoints -= pointsPerReward;
@@ -2091,6 +2145,24 @@ class AppNotification {
     this.isWarning = false,
     this.isOwnerNotification = false,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'message': message,
+      'time': time.toIso8601String(),
+      'isWarning': isWarning,
+      'isOwnerNotification': isOwnerNotification,
+    };
+  }
+
+  factory AppNotification.fromMap(Map<String, dynamic> map) {
+    return AppNotification(
+      message: map['message'] ?? '',
+      time: DateTime.tryParse(map['time']?.toString() ?? '') ?? DateTime.now(),
+      isWarning: map['isWarning'] ?? false,
+      isOwnerNotification: map['isOwnerNotification'] ?? false,
+    );
+  }
 }
 
 class JeebliProvider extends InheritedNotifier<JeebliController> {
@@ -7179,9 +7251,20 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 4),
-                        Text('📞 $phone  |  💰 $total د.ع',
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 11.5)),
+                        Row(
+                          children: [
+                            Text('📞 $phone  |  💰 $total د.ع',
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 11.5)),
+                            const Spacer(),
+                            if (data['createdAt'] != null && data['createdAt'] is Timestamp)
+                              Text(
+                                '${(data['createdAt'] as Timestamp).toDate().hour}:${(data['createdAt'] as Timestamp).toDate().minute.toString().padLeft(2, '0')}',
+                                style: const TextStyle(
+                                    color: Colors.white38, fontSize: 10),
+                              ),
+                          ],
+                        ),
                         const SizedBox(height: 6),
                         if (status == 'pending')
                           Row(
@@ -8266,7 +8349,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     final location = controller.selectedNeighborhood.isNotEmpty
         ? controller.selectedNeighborhood
         : 'لم يُحدد بعد';
-    final orderCount = controller.notifications.length;
+    final orderCount = controller.pastOrders.length;
 
     return Scaffold(
       backgroundColor: controller.bgColor,
@@ -8367,17 +8450,10 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
             ),
             const SizedBox(height: 20),
             Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildStatCard(context, 'طلب', orderCount.toString(),
                     Icons.shopping_bag_outlined),
-                const SizedBox(width: 12),
-                _buildStatCard(
-                    context,
-                    'حي',
-                    location.contains('(')
-                        ? location.split('(').first.trim()
-                        : location.split(' ').first,
-                    Icons.location_city_outlined),
                 if (controller.loyaltySystemEnabled) ...[
                   const SizedBox(width: 12),
                   _buildStatCard(context, 'نقطة 🌟', controller.loyaltyPoints.toString(),
@@ -8408,10 +8484,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                           color: controller.textColor)),
                   const SizedBox(height: 14),
                   _buildEditablePhoneTile(controller, phone),
-                  const Divider(height: 24, thickness: 0.5, color: Colors.white12),
-                  _buildInfoTile(Icons.location_on_rounded, 'المنطقة',
-                      location,
-                      color: const Color(0xFF10B981)),
                 ],
               ),
             ),
@@ -8436,10 +8508,9 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                       onTap: () => controller.toggleTheme()),
                   _buildSettingsTile(Icons.notifications_outlined,
                       'إشعارات الطلبات', Colors.amber,
-                      onTap: () {}),
-                  _buildSettingsTile(Icons.history_rounded,
-                      'سجل الطلبات', Colors.indigo,
-                      onTap: () {}),
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomerNotificationsScreen()));
+                      }),
                   _buildSettingsTile(Icons.share_rounded,
                       'مشاركة التطبيق مع الأصدقاء 📲', Colors.greenAccent,
                       onTap: () {
@@ -8887,6 +8958,17 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                         child: Text(order.id,
                             style: const TextStyle(
                                 fontSize: 10.5, color: Colors.white54)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.access_time_rounded, color: Colors.white54, size: 12),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${order.date.day}/${order.date.month}/${order.date.year} - ${order.date.hour}:${order.date.minute.toString().padLeft(2, '0')}',
+                        style: const TextStyle(fontSize: 10.5, color: Colors.white54),
                       ),
                     ],
                   ),
