@@ -11,6 +11,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -611,6 +612,14 @@ class JeebliController extends ChangeNotifier {
   void _loadSavedSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      
+      String? savedUid = prefs.getString('device_uid');
+      if (savedUid == null || savedUid.isEmpty) {
+        savedUid = const Uuid().v4();
+        await prefs.setString('device_uid', savedUid);
+      }
+      deviceUid = savedUid;
+
       final loggedIn = prefs.getBool('is_logged_in') ?? false;
       if (loggedIn) {
         _isLoggedIn = true;
@@ -620,6 +629,10 @@ class JeebliController extends ChangeNotifier {
         _userRestaurantId = prefs.getString('user_restaurant_id');
       }
       customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
+      
+      // بمجرد تحميل المعرف، سنقوم بجلب أي طلبات نشطة له للاستماع لها فوراً
+      _recoverActiveOrders();
+      
       notifyListeners();
     } catch (e) {
       debugPrint('Session load note: $e');
@@ -629,6 +642,7 @@ class JeebliController extends ChangeNotifier {
   void saveSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('device_uid', deviceUid);
       await prefs.setBool('is_logged_in', _isLoggedIn);
       if (_userRole != null) await prefs.setString('user_role', _userRole!);
       await prefs.setString('customer_name', customerName);
@@ -899,7 +913,7 @@ class JeebliController extends ChangeNotifier {
   String? _userEmailOrPhone;
   String? _userRestaurantId;
 
-  String customerId = 'user_${Random().nextInt(99999)}';
+  String deviceUid = '';
   String customerName = '';
   String customerPhone = '';
   String selectedNeighborhood = '';
@@ -971,6 +985,25 @@ class JeebliController extends ChangeNotifier {
   void _stopCustomerOrderListener() {
     _activeOrderSubscription?.cancel();
     _activeOrderSubscription = null;
+  }
+
+  void _recoverActiveOrders() async {
+    if (deviceUid.isEmpty) return;
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('orders')
+          .where('deviceUid', isEqualTo: deviceUid)
+          .get();
+      for (var doc in snapshot.docs) {
+        final status = doc.data()['status'] as String? ?? '';
+        if (status == 'pending' || status == 'preparing' || status == 'onTheWay') {
+          startCustomerOrderListener(doc.id);
+          break;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error recovering active order: $e');
+    }
   }
 
   Future<bool> detectLocation() async {
@@ -1697,7 +1730,7 @@ class JeebliController extends ChangeNotifier {
 
   // --- Order ---
   Future<bool> confirmOrder(BuildContext context) async {
-    if (!SecurityEngine.checkRateLimit(customerId)) {
+    if (!SecurityEngine.checkRateLimit(deviceUid)) {
       _addNotification(
           '⚠️ تم رصد طلبات متكررة مشبوهة! يرجى الانتظار دقيقة قبل إعادة المحاولة.',
           isWarning: true);
@@ -1797,6 +1830,7 @@ $itemsText
       final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
       await FirebaseFirestore.instance.collection('orders').doc(orderId).set({
         'orderId': orderId,
+        'deviceUid': deviceUid,
         'customerName': customerName,
         'customerPhone': customerPhone,
         'restaurantId': cartRestaurantId ?? '',
@@ -8375,10 +8409,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   const SizedBox(height: 14),
                   _buildEditablePhoneTile(controller, phone),
                   const Divider(height: 24, thickness: 0.5, color: Colors.white12),
-                  _buildInfoTile(Icons.alternate_email_rounded, 'المعرف',
-                      controller.userEmailOrPhone ?? phone,
-                      color: const Color(0xFF6366F1)),
-                  const Divider(height: 24, thickness: 0.5, color: Colors.white12),
                   _buildInfoTile(Icons.location_on_rounded, 'المنطقة',
                       location,
                       color: const Color(0xFF10B981)),
@@ -8418,8 +8448,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                         launchUrl(Uri.parse('https://wa.me/?text=$text'),
                             mode: LaunchMode.externalApplication);
                       }),
-                  _buildSettingsTile(Icons.help_outline_rounded,
-                      'الدعم والمساعدة', Colors.teal, onTap: () {}),
                   const Divider(height: 0.5, color: Colors.white12),
                   _buildSettingsTile(Icons.logout_rounded,
                       'تسجيل الخروج', Colors.red,
