@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.example.jeebli_app"
-    compileSdk = 34
+    compileSdk = 36
+    buildToolsVersion = "34.0.0"
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
