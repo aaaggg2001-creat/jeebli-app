@@ -671,22 +671,22 @@ class JeebliController extends ChangeNotifier {
       }
       deviceUid = savedUid;
 
-      // ── تحميل بيانات الجلسة كاملة ───────────────────────────────
+      // ── تحميل بيانات الجلسة والملف الشخصي دائماً وبدون شروط ───────
+      customerName = prefs.getString('customer_name') ?? '';
+      customerPhone = prefs.getString('customer_phone') ?? '';
+      customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
+      selectedNeighborhood = prefs.getString('selected_neighborhood') ?? '';
+      streetDetails = prefs.getString('street_details') ?? '';
+      _userEmailOrPhone = prefs.getString('user_email_or_phone');
+      _userRestaurantId = prefs.getString('user_restaurant_id');
+      _userRole = prefs.getString('user_role');
+
       final loggedIn = prefs.getBool('is_logged_in') ?? false;
-      if (loggedIn) {
+      
+      // إذا كان مسجلاً دخول مسبقاً أو لديه اسم ورقم هاتف محفوظان → اعتبره زبوناً مسجلاً تلقائياً
+      if (loggedIn || customerName.isNotEmpty || customerPhone.isNotEmpty) {
         _isLoggedIn = true;
-        _userRole = prefs.getString('user_role');
-        customerName = prefs.getString('customer_name') ?? '';
-        customerPhone = prefs.getString('customer_phone') ?? '';
-        customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
-        _userRestaurantId = prefs.getString('user_restaurant_id');
-        // بيانات التوصيل المحفوظة
-        selectedNeighborhood = prefs.getString('selected_neighborhood') ?? '';
-        streetDetails = prefs.getString('street_details') ?? '';
-        _userEmailOrPhone = prefs.getString('user_email_or_phone');
-      } else {
-        // حتى لو غير مسجل: نُحمّل الأفاتار فقط
-        customerAvatarUrl = prefs.getString('customer_avatar_url') ?? '';
+        _userRole ??= 'customer';
       }
       
       // بمجرد تحميل المعرف، نجلب الطلبات النشطة للاستماع لها فوراً
@@ -1912,6 +1912,11 @@ $itemsText
   }
 
   Future<void> completeOrderAndResetHome() async {
+    _isLoggedIn = true;
+    _userRole ??= 'customer';
+    saveSession();
+    _saveLocalData();
+
     _addNotification('✅ تم إرسال طلبك بنجاح! يتم الآن تجهيزه في المطعم.');
     
     final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
@@ -2063,6 +2068,22 @@ $itemsText
 
   void updateCustomerPhone(String newPhone) {
     customerPhone = newPhone;
+    if (newPhone.isNotEmpty) {
+      _isLoggedIn = true;
+      _userRole ??= 'customer';
+    }
+    saveSession();
+    _playClickFeedback();
+    notifyListeners();
+  }
+
+  void updateCustomerName(String newName) {
+    customerName = newName;
+    if (newName.isNotEmpty) {
+      _isLoggedIn = true;
+      _userRole ??= 'customer';
+    }
+    saveSession();
     _playClickFeedback();
     notifyListeners();
   }
@@ -8521,6 +8542,7 @@ class CustomerProfileScreen extends StatefulWidget {
 }
 
 class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
+  bool _isEditingName = false;
   bool _isEditingPhone = false;
   late TextEditingController _phoneController;
   late TextEditingController _nameController;
@@ -8686,6 +8708,8 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                           fontWeight: FontWeight.bold,
                           color: controller.textColor)),
                   const SizedBox(height: 14),
+                  _buildEditableNameTile(controller, name),
+                  const Divider(height: 24, color: Colors.white12),
                   _buildEditablePhoneTile(controller, phone),
                 ],
               ),
@@ -8928,6 +8952,87 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildEditableNameTile(JeebliController controller, String name) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+              color: const Color(0xFFFF8F00).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10)),
+          child: const Icon(Icons.person_outline_rounded,
+              color: Color(0xFFFF8F00), size: 18),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: _isEditingName
+              ? TextField(
+                  controller: _nameController,
+                  keyboardType: TextInputType.name,
+                  autofocus: true,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'اسمك الكريم',
+                    isDense: true,
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                            const BorderSide(color: Colors.white24)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFFF8F00))),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.05),
+                  ),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('الاسم الشخصي',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.white54)),
+                    Text(name.isNotEmpty ? name : 'لم يُدخل',
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white)),
+                  ],
+                ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: () {
+            if (_isEditingName) {
+              final newName = _nameController.text.trim();
+              if (newName.isNotEmpty) {
+                controller.updateCustomerName(newName);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('✅ تم تحديث الاسم!'),
+                    behavior: SnackBarBehavior.floating,
+                    backgroundColor: Colors.green));
+              }
+            }
+            setState(() => _isEditingName = !_isEditingName);
+          },
+          icon: Icon(
+            _isEditingName
+                ? Icons.check_circle_rounded
+                : Icons.edit_outlined,
+            color: _isEditingName ? Colors.green : const Color(0xFFFF8F00),
+            size: 20,
+          ),
+        ),
+      ],
     );
   }
 
