@@ -96,6 +96,30 @@ class JeebliNotificationService {
     } catch (e) {
       debugPrint('FCM Token error: $e');
     }
+
+    // ── تحديث التوكن عند تجديده ─────────────────────────────────
+    _fcm.onTokenRefresh.listen((newToken) {
+      debugPrint('🔄 FCM Token refreshed: $newToken');
+    });
+  }
+
+  /// حفظ FCM Token في Firestore لإرسال الإشعارات عند إغلاق التطبيق
+  Future<void> saveFcmTokenToFirestore(String deviceUid) async {
+    try {
+      final token = await _fcm.getToken();
+      if (token == null || token.isEmpty) return;
+      await FirebaseFirestore.instance
+          .collection('fcm_tokens')
+          .doc(deviceUid)
+          .set({
+        'token': token,
+        'platform': 'android',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('✅ FCM Token saved to Firestore for device: $deviceUid');
+    } catch (e) {
+      debugPrint('FCM Token save error: $e');
+    }
   }
 
   /// إرسال إشعار محلي يظهر فوراً
@@ -689,8 +713,19 @@ class JeebliController extends ChangeNotifier {
         _userRole ??= 'customer';
       }
       
+      // ── استعادة معرّف الطلب النشط ──────────────────────────────
+      final savedOrderId = prefs.getString('active_order_id');
+      if (savedOrderId != null && savedOrderId.isNotEmpty) {
+        activeOrderId = savedOrderId;
+      }
+
       // بمجرد تحميل المعرف، نجلب الطلبات النشطة للاستماع لها فوراً
       _recoverActiveOrders();
+
+      // ── حفظ FCM Token في Firestore ───────────────────────────────
+      if (deviceUid.isNotEmpty) {
+        jeebliNotifications.saveFcmTokenToFirestore(deviceUid);
+      }
     } catch (e) {
       debugPrint('Session load note: $e');
     } finally {
@@ -714,6 +749,12 @@ class JeebliController extends ChangeNotifier {
       await prefs.setString('street_details', streetDetails);
       if (_userRestaurantId != null) await prefs.setString('user_restaurant_id', _userRestaurantId!);
       if (_userEmailOrPhone != null) await prefs.setString('user_email_or_phone', _userEmailOrPhone!);
+      // ── حفظ معرّف الطلب النشط ────────────────────────────────────
+      if (activeOrderId != null && activeOrderId!.isNotEmpty) {
+        await prefs.setString('active_order_id', activeOrderId!);
+      } else {
+        await prefs.remove('active_order_id');
+      }
     } catch (e) {
       debugPrint('Session save note: $e');
     }
@@ -1050,12 +1091,16 @@ class JeebliController extends ChangeNotifier {
         case 'delivered':
           title = '✅ تم استلام طلبك!';
           body = 'تم توصيل وجبتك بنجاح. ألف صحة وعافية ❤️';
-          _stopCustomerOrderListener(); // أنهِ الاستماع بعد التسليم
+          _stopCustomerOrderListener();
+          activeOrderId = null; // أزِل الطلب النشط بعد التسليم
+          saveSession(); // احفظ الحالة (بدون active_order_id)
           break;
         case 'rejected':
           title = '❌ تم رفض طلبك';
           body = 'نأسف، قام المطعم برفض طلبك. يمكنك تجربة مطعم آخر.';
           _stopCustomerOrderListener();
+          activeOrderId = null; // أزِل الطلب النشط بعد الرفض
+          saveSession();
           break;
         default:
           return;
@@ -1800,16 +1845,29 @@ class JeebliController extends ChangeNotifier {
   // --- Notifications ---
   void _addNotification(String message,
       {bool isWarning = false, bool isOwnerNotification = false}) {
-    notifications.insert(
-        0,
-        AppNotification(
-          message: message,
-          time: DateTime.now(),
-          isWarning: isWarning,
-          isOwnerNotification: isOwnerNotification,
-        ));
+    final notif = AppNotification(
+      message: message,
+      time: DateTime.now(),
+      isWarning: isWarning,
+      isOwnerNotification: isOwnerNotification,
+    );
+    notifications.insert(0, notif);
     unreadNotifications++;
     _saveLocalData();
+    // ── حفظ الإشعار في Firestore (دائم وغير قابل للضياع) ─────────
+    if (deviceUid.isNotEmpty) {
+      FirebaseFirestore.instance
+          .collection('notification_history')
+          .doc(deviceUid)
+          .collection('items')
+          .add({
+        'message': message,
+        'isWarning': isWarning,
+        'isOwnerNotification': isOwnerNotification,
+        'isRead': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      }).catchError((e) => debugPrint('Notification Firestore save error: $e'));
+    }
   }
 
   void markNotificationsRead() {
@@ -1948,6 +2006,7 @@ $itemsText
         'createdAt': FieldValue.serverTimestamp(),
       });
       activeOrderId = orderId; // حفظ المعرّف لمتابعة الطلب حياً
+      saveSession(); // ← احفظ activeOrderId فوراً لبقاء الكارت بعد إغلاق التطبيق
       // ★ ابدأ الاستماع لتغييرات هذا الطلب وأرسل الإشعار للزبون حصراً
       startCustomerOrderListener(orderId);
       debugPrint('✅ تم حفظ الطلب في Firestore: $orderId');
@@ -2909,6 +2968,17 @@ class MainNavigationShell extends StatelessWidget {
 class CustomerNotificationsScreen extends StatelessWidget {
   const CustomerNotificationsScreen({super.key});
 
+  Future<void> _clearAllFirestoreNotifications(String deviceUid) async {
+    final coll = FirebaseFirestore.instance
+        .collection('notification_history')
+        .doc(deviceUid)
+        .collection('items');
+    final snap = await coll.get();
+    for (final doc in snap.docs) {
+      await doc.reference.delete();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = JeebliProvider.of(context);
@@ -2918,6 +2988,8 @@ class CustomerNotificationsScreen extends StatelessWidget {
         controller.markNotificationsRead();
       }
     });
+
+    final deviceUid = controller.deviceUid;
 
     return Scaffold(
       backgroundColor: controller.bgColor,
@@ -2932,104 +3004,161 @@ class CustomerNotificationsScreen extends StatelessWidget {
         backgroundColor: controller.cardColor,
         elevation: 0,
         actions: [
-          if (controller.notifications.isNotEmpty)
-            TextButton(
-              onPressed: () => controller.clearNotifications(),
-              child: const Text('مسح الكل',
-                  style: TextStyle(color: Colors.redAccent, fontSize: 12)),
-            ),
+          TextButton(
+            onPressed: () async {
+              controller.clearNotifications();
+              if (deviceUid.isNotEmpty) {
+                await _clearAllFirestoreNotifications(deviceUid);
+              }
+            },
+            child: const Text('مسح الكل',
+                style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+          ),
         ],
       ),
-      body: controller.notifications.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.notifications_off_outlined,
-                      size: 80,
-                      color: controller.subtextColor.withOpacity(0.4)),
-                  const SizedBox(height: 16),
-                  Text('لا توجد إشعارات بعد',
-                      style: TextStyle(
-                          color: controller.subtextColor,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text('ستظهر هنا إشعارات طلباتك وعروضك',
-                      style: TextStyle(
-                          color: controller.subtextColor.withOpacity(0.6),
-                          fontSize: 13)),
-                ],
-              ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: controller.notifications.length,
-              separatorBuilder: (context2, i) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final notif = controller.notifications[index];
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: notif.isWarning
-                        ? Colors.red.withOpacity(0.1)
-                        : controller.cardColor,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: notif.isWarning
-                          ? Colors.redAccent.withOpacity(0.3)
-                          : Colors.white.withOpacity(0.05),
-                    ),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: notif.isWarning
-                              ? Colors.redAccent.withOpacity(0.15)
-                              : const Color(0xFFFF8F00).withOpacity(0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          notif.isWarning
-                              ? Icons.warning_amber_rounded
-                              : Icons.notifications_rounded,
-                          color: notif.isWarning
-                              ? Colors.redAccent
-                              : const Color(0xFFFF8F00),
-                          size: 20,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(notif.message,
-                                style: TextStyle(
-                                    color: controller.textColor,
-                                    fontSize: 13,
-                                    height: 1.4)),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${notif.time.hour.toString().padLeft(2, '0')}:${notif.time.minute.toString().padLeft(2, '0')}',
-                              style: TextStyle(
-                                  color: controller.subtextColor,
-                                  fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+      body: deviceUid.isEmpty
+          ? _buildEmpty(controller)
+          : StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('notification_history')
+                  .doc(deviceUid)
+                  .collection('items')
+                  .orderBy('createdAt', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                // fallback to local if Firestore not connected
+                final firestoreDocs = snapshot.data?.docs ?? [];
+                final localNotifs = controller.notifications;
+
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    localNotifs.isEmpty) {
+                  return const Center(
+                      child: CircularProgressIndicator(
+                          color: Color(0xFFFF8F00)));
+                }
+
+                if (firestoreDocs.isEmpty && localNotifs.isEmpty) {
+                  return _buildEmpty(controller);
+                }
+
+                // Use Firestore data if available, else fall back to local
+                if (firestoreDocs.isNotEmpty) {
+                  return ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: firestoreDocs.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final data = firestoreDocs[index].data()
+                          as Map<String, dynamic>;
+                      final message = data['message'] as String? ?? '';
+                      final isWarning = data['isWarning'] as bool? ?? false;
+                      final ts = data['createdAt'] as Timestamp?;
+                      final time = ts?.toDate() ?? DateTime.now();
+                      return _buildNotifTile(
+                          controller, message, isWarning, time);
+                    },
+                  );
+                }
+
+                // Fallback: local notifications
+                return ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: localNotifs.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final notif = localNotifs[index];
+                    return _buildNotifTile(
+                        controller, notif.message, notif.isWarning, notif.time);
+                  },
                 );
               },
             ),
     );
   }
+
+  Widget _buildEmpty(JeebliController controller) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.notifications_off_outlined,
+              size: 80,
+              color: controller.subtextColor.withOpacity(0.4)),
+          const SizedBox(height: 16),
+          Text('لا توجد إشعارات بعد',
+              style: TextStyle(
+                  color: controller.subtextColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('ستظهر هنا إشعارات طلباتك وعروضك',
+              style: TextStyle(
+                  color: controller.subtextColor.withOpacity(0.6),
+                  fontSize: 13)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotifTile(JeebliController controller, String message,
+      bool isWarning, DateTime time) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isWarning
+            ? Colors.red.withOpacity(0.1)
+            : controller.cardColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isWarning
+              ? Colors.redAccent.withOpacity(0.3)
+              : Colors.white.withOpacity(0.05),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isWarning
+                  ? Colors.redAccent.withOpacity(0.15)
+                  : const Color(0xFFFF8F00).withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isWarning
+                  ? Icons.warning_amber_rounded
+                  : Icons.notifications_rounded,
+              color: isWarning ? Colors.redAccent : const Color(0xFFFF8F00),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(message,
+                    style: TextStyle(
+                        color: controller.textColor,
+                        fontSize: 13,
+                        height: 1.4)),
+                const SizedBox(height: 4),
+                Text(
+                  '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')} - ${time.day}/${time.month}',
+                  style: TextStyle(
+                      color: controller.subtextColor, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
+
 
 /// ============================================================================
 /// 6. شاشة المطاعم
