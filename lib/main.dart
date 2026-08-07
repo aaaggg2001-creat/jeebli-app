@@ -4116,59 +4116,160 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                     }),
                   ),
                 ),
-              // ─── بطاقة المندوب (تظهر فقط إذا كان في الطريق) ───
+              // ─── بطاقة المندوب مع التتبع الحي ───
               if (status == 'onTheWay' && driverName.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.lightBlueAccent.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.lightBlueAccent.withOpacity(0.15),
-                        ),
-                        child: const Icon(Icons.person_pin_circle_rounded, color: Colors.lightBlueAccent, size: 24),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                Builder(builder: (ctx) {
+                  final driverLat = data['driverLat'] as double?;
+                  final driverLng = data['driverLng'] as double?;
+                  final custLat = controller.customerLat;
+                  final custLng = controller.customerLng;
+                  final hasLive = driverLat != null && driverLng != null;
+
+                  String? distanceText;
+                  if (hasLive && custLat != null && custLng != null) {
+                    final meters = Geolocator.distanceBetween(
+                        custLat, custLng, driverLat, driverLng);
+                    distanceText = meters < 1000
+                        ? 'على بُعد ${meters.toStringAsFixed(0)} متر منك'
+                        : 'على بُعد ${(meters / 1000).toStringAsFixed(1)} كم منك';
+                  }
+
+                  return Container(
+                    margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.lightBlueAccent.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.3)),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
                           children: [
-                            const Text('🛵 المندوب', style: TextStyle(color: Colors.white54, fontSize: 10)),
-                            Text(driverName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.lightBlueAccent.withOpacity(0.15),
+                              ),
+                              child: const Icon(Icons.person_pin_circle_rounded,
+                                  color: Colors.lightBlueAccent, size: 24),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('🛵 المندوب',
+                                      style: TextStyle(
+                                          color: Colors.white54, fontSize: 10)),
+                                  Text(driverName,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14)),
+                                  if (hasLive)
+                                    Row(children: [
+                                      Container(
+                                        width: 6,
+                                        height: 6,
+                                        margin: const EdgeInsets.only(
+                                            right: 5, top: 3),
+                                        decoration: const BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Colors.greenAccent,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          distanceText ?? 'التتبع الحي نشط 🟢',
+                                          style: const TextStyle(
+                                              color: Colors.greenAccent,
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w500),
+                                        ),
+                                      ),
+                                    ])
+                                  else
+                                    const Text(
+                                      '⏳ في انتظار بيانات الموقع...',
+                                      style: TextStyle(
+                                          color: Colors.white38, fontSize: 10),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (driverPhone.isNotEmpty)
+                              GestureDetector(
+                                onTap: () async {
+                                  final uri = Uri.parse('tel:$driverPhone');
+                                  if (await canLaunchUrl(uri)) launchUrl(uri);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Colors.lightBlueAccent.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                        color: Colors.lightBlueAccent
+                                            .withOpacity(0.5)),
+                                  ),
+                                  child: const Row(children: [
+                                    Icon(Icons.call_rounded,
+                                        color: Colors.lightBlueAccent, size: 16),
+                                    SizedBox(width: 4),
+                                    Text('اتصال',
+                                        style: TextStyle(
+                                            color: Colors.lightBlueAccent,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold)),
+                                  ]),
+                                ),
+                              ),
                           ],
                         ),
-                      ),
-                      if (driverPhone.isNotEmpty)
-                        GestureDetector(
-                          onTap: () async {
-                            final uri = Uri.parse('tel:$driverPhone');
-                            if (await canLaunchUrl(uri)) launchUrl(uri);
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.lightBlueAccent.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.5)),
+                        // ─── زر تتبع على الخريطة (يظهر فقط عند وجود موقع المندوب) ───
+                        if (hasLive) ...[
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                final String mapUrl =
+                                    custLat != null && custLng != null
+                                        ? 'https://maps.google.com/maps?saddr=$custLat,$custLng&daddr=$driverLat,$driverLng'
+                                        : 'https://maps.google.com/?q=$driverLat,$driverLng';
+                                final uri = Uri.parse(mapUrl);
+                                if (await canLaunchUrl(uri)) {
+                                  launchUrl(uri,
+                                      mode: LaunchMode.externalApplication);
+                                }
+                              },
+                              icon: const Icon(Icons.near_me_rounded,
+                                  size: 16, color: Color(0xFFFF8F00)),
+                              label: const Text('🗺️ تتبع المندوب على الخريطة',
+                                  style: TextStyle(
+                                      color: Color(0xFFFF8F00),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold)),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                    color: const Color(0xFFFF8F00)
+                                        .withOpacity(0.5)),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                              ),
                             ),
-                            child: const Row(children: [
-                              Icon(Icons.call_rounded, color: Colors.lightBlueAccent, size: 16),
-                              SizedBox(width: 4),
-                              Text('اتصال', style: TextStyle(color: Colors.lightBlueAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ]),
                           ),
-                        ),
-                    ],
-                  ),
-                ),
+                        ],
+                      ],
+                    ),
+                  );
+                }),
               const SizedBox(height: 4),
             ],
           ),
@@ -4190,7 +4291,48 @@ class DriverDashboardScreen extends StatefulWidget {
 }
 
 class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
-  int _prevOrderCount = -1; // -1 = أول تحميل، لا نُرسل إشعاراً
+  int _prevOrderCount = -1;
+  StreamSubscription<Position>? _locationSubscription;
+  String? _activeTrackingOrderId;
+
+  @override
+  void dispose() {
+    _locationSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startLocationTracking(String orderId) async {
+    if (_activeTrackingOrderId == orderId) return; // already tracking
+    await _locationSubscription?.cancel();
+    _activeTrackingOrderId = orderId;
+
+    LocationPermission perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) return;
+
+    const settings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 20, // update every 20 meters
+    );
+    _locationSubscription =
+        Geolocator.getPositionStream(locationSettings: settings)
+            .listen((Position pos) {
+      FirebaseFirestore.instance.collection('orders').doc(orderId).update({
+        'driverLat': pos.latitude,
+        'driverLng': pos.longitude,
+        'driverLocAt': FieldValue.serverTimestamp(),
+      }).catchError((e) => debugPrint('GPS update error: \$e'));
+    });
+  }
+
+  void _stopLocationTracking() {
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+    _activeTrackingOrderId = null;
+  }
 
   void _checkForNewOrders(int currentCount, String driverName) {
     if (_prevOrderCount == -1) {
@@ -4610,14 +4752,19 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                               child: ElevatedButton.icon(
                                 onPressed: () async {
                                   await docRef.update({'status': 'onTheWay'});
+                                  // 📍 ابدأ إرسال الموقع للزبون
+                                  _startLocationTracking(docRef.id);
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('🛵 تم تأكيد استلام الطلب! أنت الآن في الطريق'), backgroundColor: Colors.amber),
+                                      const SnackBar(
+                                        content: Text('🛵 تم تأكيد استلام الطلب! الموقع يُرسل للزبون الآن'),
+                                        backgroundColor: Colors.amber,
+                                      ),
                                     );
                                   }
                                 },
                                 icon: const Icon(Icons.delivery_dining_rounded, size: 20),
-                                label: const Text('✅ استلمت الطلب من المطعم - أنا في الطريق!'),
+                                label: const Text('✅ استلمت الطلب - أنا في الطريق!'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.amber,
                                   foregroundColor: Colors.black,
@@ -4658,10 +4805,17 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   await docRef.update({
                                     'status': 'delivered',
                                     'deliveredAt': FieldValue.serverTimestamp(),
+                                    'driverLat': FieldValue.delete(),
+                                    'driverLng': FieldValue.delete(),
                                   });
+                                  // 🛑 أوقف إرسال الموقع
+                                  _stopLocationTracking();
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('✅ تم تسليم الطلب بنجاح!'), backgroundColor: Colors.green),
+                                      const SnackBar(
+                                        content: Text('✅ تم تسليم الطلب بنجاح!'),
+                                        backgroundColor: Colors.green,
+                                      ),
                                     );
                                   }
                                 },
