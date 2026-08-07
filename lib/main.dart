@@ -7512,6 +7512,12 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                   final customer = data['customerName'] ?? '---';
                   final phone = data['customerPhone'] ?? '';
                   final neighborhood = data['neighborhood'] ?? '';
+                  final streetDetails = data['streetDetails'] ?? '';
+                  final items = (data['items'] as List<dynamic>?) ?? [];
+                  final custLat = data['customerLat'];
+                  final custLng = data['customerLng'];
+                  final hasLocation = custLat != null && custLng != null;
+                  
                   // ignore: unused_local_variable
                   final orderId = data['orderId'] ?? docs[index].id;
 
@@ -7606,6 +7612,10 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                             ),
                           ],
                         ),
+                        if (streetDetails.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text('أقرب نقطة دالة: $streetDetails', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                        ],
                         const SizedBox(height: 4),
                         Row(
                           children: [
@@ -7621,6 +7631,55 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                               ),
                           ],
                         ),
+                        if (hasLocation) ...[
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                final mapUri = Uri.parse('https://maps.google.com/?q=$custLat,$custLng');
+                                if (await canLaunchUrl(mapUri)) {
+                                  launchUrl(mapUri, mode: LaunchMode.externalApplication);
+                                }
+                              },
+                              icon: const Icon(Icons.map_rounded, size: 14, color: Color(0xFFFF8F00)),
+                              label: const Text('📍 فتح موقع الزبون على الخريطة', style: TextStyle(color: Color(0xFFFF8F00), fontSize: 11, fontWeight: FontWeight.bold)),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: const Color(0xFFFF8F00).withOpacity(0.5)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        const Text('📋 تفاصيل الطلب:', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        ...items.map((item) {
+                          final iMap = item as Map<String, dynamic>;
+                          final iName = iMap['name'] ?? '';
+                          final iQty = iMap['qty'] ?? 1;
+                          final iPrice = (iMap['price'] ?? 0).toStringAsFixed(0);
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 20, height: 20,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFF8F00).withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text('$iQty', style: const TextStyle(color: Color(0xFFFF8F00), fontSize: 10, fontWeight: FontWeight.bold)),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(iName, style: const TextStyle(color: Colors.white70, fontSize: 11))),
+                                Text('$iPrice د.ع', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                              ],
+                            ),
+                          );
+                        }),
                         const SizedBox(height: 6),
                         if (status == 'pending')
                           Row(
@@ -7864,12 +7923,6 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
       orElse: () => controller.allRestaurants.first,
     );
 
-    final restaurantOrders = controller.pastOrders
-        .where((o) => o.restaurantId == restId)
-        .toList();
-    final totalSales =
-        restaurantOrders.fold(0.0, (acc, o) => acc + o.totalAmount);
-
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -7883,72 +7936,88 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               offset: const Offset(0, 4))
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('orders')
+            .where('restaurantId', isEqualTo: restId)
+            .where('status', isEqualTo: 'delivered')
+            .snapshots(),
+        builder: (context, snapshot) {
+          final docs = snapshot.data?.docs ?? [];
+          final totalSales = docs.fold(0.0, (acc, doc) => acc + (((doc.data() as Map<String, dynamic>)['totalAmount'] as num?)?.toDouble() ?? 0.0));
+          final orderCount = docs.length;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(Icons.bar_chart_rounded, color: Colors.amber, size: 22),
-                  SizedBox(width: 8),
-                  Text('إحصائيات المطعم والمبيعات 📊',
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
+                  const Row(
+                    children: [
+                      Icon(Icons.bar_chart_rounded, color: Colors.amber, size: 22),
+                      SizedBox(width: 8),
+                      Text('إحصائيات المطعم والمبيعات 📊',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
+                    ],
+                  ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text('تقييم ${restaurant.rating} ⭐',
+                        style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.amber)),
+                  ),
                 ],
               ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.amber.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text('تقييم ${restaurant.rating} ⭐',
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.amber)),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _analyticsItem(
+                        'إجمالي مبيعاتك',
+                        '${totalSales.toStringAsFixed(0)} د.ع',
+                        Icons.payments_outlined,
+                        Colors.greenAccent),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _analyticsItem('الطلبات الناجحة', '$orderCount طلب',
+                        Icons.shopping_bag_outlined, Colors.amber),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _analyticsItem('الوجبات المتوفرة',
+                        '$availableCount من ${products.length}', Icons.restaurant_menu, Colors.lightBlueAccent),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _analyticsItem(
+                        'أجور التوصيل',
+                        '${restaurant.deliveryFee.toStringAsFixed(0)} د.ع',
+                        Icons.delivery_dining,
+                        Colors.orangeAccent),
+                  ),
+                ],
               ),
             ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _analyticsItem(
-                    'إجمالي مبيعاتك',
-                    '${totalSales.toStringAsFixed(0)} د.ع',
-                    Icons.payments_outlined,
-                    Colors.greenAccent),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _analyticsItem('عدد الطلبات', '${restaurantOrders.length} طلب',
-                    Icons.shopping_bag_outlined, Colors.amber),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _analyticsItem('الوجبات المتوفرة',
-                    '$availableCount من ${products.length}', Icons.restaurant_menu, Colors.lightBlueAccent),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _analyticsItem(
-                    'أجور التوصيل',
-                    '${restaurant.deliveryFee.toStringAsFixed(0)} د.ع',
-                    Icons.delivery_dining,
-                    Colors.orangeAccent),
-              ),
-            ],
-          ),
+          );
+        },
+      ),
+    );
         ],
       ),
     );
