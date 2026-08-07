@@ -8172,9 +8172,6 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
         },
       ),
     );
-        ],
-      ),
-    );
   }
 
   Widget _analyticsItem(
