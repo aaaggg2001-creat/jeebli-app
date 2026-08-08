@@ -1713,6 +1713,15 @@ class JeebliController extends ChangeNotifier {
           customerName = data['name'] ?? 'المندوب';
           customerPhone = phone;
           saveSession();
+          
+          // حفظ جهاز المندوب لإرسال الإشعارات له لاحقاً
+          if (deviceUid.isNotEmpty) {
+            FirebaseFirestore.instance
+                .collection('admin_credentials')
+                .doc(phone)
+                .set({'deviceUid': deviceUid}, SetOptions(merge: true));
+          }
+          
           _addNotification('🛵 مرحباً $customerName! تم تسجيل دخولك كمندوب توصيل.');
           notifyListeners();
           return true;
@@ -8165,6 +8174,17 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                     custDeviceUid: custUid,
                                                     title: '👨‍🍳 المطعم قبل طلبك!',
                                                     body: 'وجبتك قيد التحضير الآن! المندوب: $dName',
+                                                    orderId: docRef.id,
+                                                  );
+                                                }
+                                                // 🔔 إشعار للمندوب عبر OneSignal (إذا كان مسجل دخوله مسبقاً)
+                                                final driverDoc = await FirebaseFirestore.instance.collection('admin_credentials').doc(dPhone).get();
+                                                final driverDeviceUid = driverDoc.data()?['deviceUid']?.toString() ?? '';
+                                                if (driverDeviceUid.isNotEmpty && context.mounted) {
+                                                  JeebliProvider.of(context)._notifyCustomer(
+                                                    custDeviceUid: driverDeviceUid,
+                                                    title: '🛵 طلب جديد بانتظارك!',
+                                                    body: 'تم تكليفك بتوصيل طلب جديد للمطعم، افتح التطبيق للتفاصيل.',
                                                     orderId: docRef.id,
                                                   );
                                                 }
