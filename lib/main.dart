@@ -18,6 +18,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'super_admin_screen.dart';
+import 'phone_auth_screen.dart';
 
 // ─── OneSignal Config ──────────────────────────────────────────────────────
 const String _kOneSignalAppId = '43a24efe-0d39-453f-8b14-1c3a6282c230';
@@ -10111,153 +10112,119 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 32),
 
-                    // ---- الحقل الأول ----
-                    // زبون → اسمه الكامل | مالك → رقم هاتفه
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: _buildInputField(
-                        key: ValueKey('field1_$_selectedRole'),
-                        controller: _idController,
-                        label: isCustomer ? 'اسمك الكامل' : 'رقم الهاتف',
-                        icon: isCustomer
-                            ? Icons.person_outline_rounded
-                            : Icons.phone_android_rounded,
-                        keyboardType: isCustomer
-                            ? TextInputType.name
-                            : TextInputType.phone,
-                        validator: (v) => (v == null || v.trim().isEmpty)
-                            ? (isCustomer ? 'الرجاء إدخال اسمك' : 'الرجاء إدخال رقم الهاتف')
-                            : null,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // ---- الحقل الثاني ----
-                    // زبون → رقم هاتفه | مالك → الباسورد
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: isCustomer
-                          ? _buildInputField(
-                              key: const ValueKey('phone_customer'),
-                              controller: _phoneController,
-                              label: 'رقم هاتفك (07xxxxxxxxx)',
-                              icon: Icons.phone_android_rounded,
-                              keyboardType: TextInputType.phone,
-                              validator: (v) {
-                                if (v == null || v.trim().isEmpty) {
-                                  return 'الرجاء إدخال رقم هاتفك';
-                                }
-                                final phone = v.trim().replaceAll(RegExp(r'\s+'), '');
-                                // الرقم العراقي: 11 رقم يبدأ بـ 07
-                                if (!RegExp(r'^07[3-9]\d{8}$').hasMatch(phone)) {
-                                  return '❌ رقم غير صحيح — أدخل رقم عراقي صحيح (مثال: 07801234567)';
-                                }
-                                return null;
-                              },
-                            )
-                          : _buildPasswordField(
-                              key: const ValueKey('pass_owner'),
-                            ),
-                    ),
-                    const SizedBox(height: 36),
-
-                    // تلميح للزبائن
-                    if (isCustomer) ...
-                    [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: Colors.amber.withOpacity(0.2)),
-                        ),
-                        child: const Row(
-                          children: [
-                            Icon(Icons.info_outline,
-                                color: Colors.amber, size: 16),
-                            SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'إذا كنت زبوناً جديداً ستُسجَّل تلقائياً 🎉',
-                                style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: Colors.amber),
-                              ),
-                            ),
-                          ],
+                    // ---- حقول الإدخال (فقط لأصحاب المطاعم أو الإدارة) ----
+                    if (!isCustomer) ...[
+                      // الحقل الأول: رقم الهاتف (لأصحاب المطاعم)
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _buildInputField(
+                          key: ValueKey('field1_$_selectedRole'),
+                          controller: _idController,
+                          label: 'رقم الهاتف',
+                          icon: Icons.phone_android_rounded,
+                          keyboardType: TextInputType.phone,
+                          validator: (v) => (v == null || v.trim().isEmpty) ? 'الرجاء إدخال رقم الهاتف' : null,
                         ),
                       ),
                       const SizedBox(height: 20),
-                    ],
 
-                    // تلميح للمالك / السوبر أدمن
-                    if (!isCustomer) ...
-                    [
+                      // الحقل الثاني: الباسورد
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _buildPasswordField(
+                          key: const ValueKey('pass_owner'),
+                        ),
+                      ),
+                      const SizedBox(height: 36),
+
+                      // تلميح للمالك / السوبر أدمن
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         decoration: BoxDecoration(
                           color: Colors.blue.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: Colors.blue.withOpacity(0.2)),
+                          border: Border.all(color: Colors.blue.withOpacity(0.2)),
                         ),
                         child: const Row(
                           children: [
-                            Icon(Icons.admin_panel_settings_outlined,
-                                color: Colors.lightBlue, size: 16),
+                            Icon(Icons.admin_panel_settings_outlined, color: Colors.lightBlue, size: 16),
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 'لوحة أصحاب المطاعم والإدارة العليا',
-                                style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: Colors.lightBlue),
+                                style: TextStyle(fontSize: 11.5, color: Colors.lightBlue),
                               ),
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(height: 20),
-                    ],
 
-                    // زر الدخول
-                    Container(
-                      width: double.infinity,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        gradient: const LinearGradient(
-                            colors: [Color(0xFFFF8F00), Color(0xFFE65100)]),
-                        boxShadow: [
-                          BoxShadow(
-                              color: const Color(0xFFE65100).withOpacity(0.4),
-                              blurRadius: 16,
-                              offset: const Offset(0, 8))
-                        ],
-                      ),
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _submitLogin,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16)),
+                      // زر الدخول للإدارة
+                      Container(
+                        width: double.infinity,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: const LinearGradient(colors: [Color(0xFFFF8F00), Color(0xFFE65100)]),
+                          boxShadow: [
+                            BoxShadow(color: const Color(0xFFE65100).withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 8))
+                          ],
                         ),
-                        child: _isLoading
-                            ? const CircularProgressIndicator(
-                                color: Colors.white)
-                            : Text(
-                                isCustomer ? 'دخول / تسجيل 🚀' : 'تسجيل الدخول',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: Colors.white,
-                                    letterSpacing: 1.0)),
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _submitLogin,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ),
+                          child: _isLoading
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : const Text('تسجيل الدخول', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white, letterSpacing: 1.0)),
+                        ),
                       ),
-                    ),
+                    ] else ...[
+                      // ---- واجهة الزبائن (تسجيل الدخول برقم الهاتف SMS OTP) ----
+                      const Icon(Icons.phonelink_lock_rounded, size: 64, color: Colors.amber),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'تسجيل الدخول السريع',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'لا حاجة لكلمات المرور بعد الآن! سجل دخولك برقم هاتفك عبر رسالة SMS لضمان حفظ حسابك وطلباتك للأبد.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.5),
+                      ),
+                      const SizedBox(height: 36),
+                      
+                      // زر الدخول للزبائن
+                      Container(
+                        width: double.infinity,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: const LinearGradient(colors: [Color(0xFFFF8F00), Color(0xFFE65100)]),
+                          boxShadow: [
+                            BoxShadow(color: const Color(0xFFE65100).withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 8))
+                          ],
+                        ),
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (ctx) => const CustomerPhoneLoginScreen()));
+                          },
+                          icon: const Icon(Icons.sms_rounded, color: Colors.white),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ),
+                          label: const Text('دخول عبر رقم الهاتف (SMS)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
