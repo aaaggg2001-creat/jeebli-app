@@ -1906,63 +1906,6 @@ class JeebliController extends ChangeNotifier {
       'timestamp': DateTime.now().toIso8601String(),
     });
 
-    final restName = _activeRestaurant?.name ?? 'المطعم';
-    final rawPhone = _activeRestaurant?.whatsappNumber.isNotEmpty == true
-        ? _activeRestaurant!.whatsappNumber
-        : '07802019730';
-
-    String phoneNumber = rawPhone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (phoneNumber.startsWith('0')) {
-      phoneNumber = '964${phoneNumber.substring(1)}';
-    } else if (!phoneNumber.startsWith('964')) {
-      phoneNumber = '964$phoneNumber';
-    }
-
-    final itemsText = _cartItems
-        .map((i) => '• ${i.quantity}× ${i.product.name} (${i.totalPrice.toStringAsFixed(0)} د.ع)')
-        .join('\n');
-
-    final notesSection = orderNotes.trim().isNotEmpty
-        ? '\n📝 *ملاحظات الطلب:* ${orderNotes.trim()}'
-        : '';
-
-    final mapLinkSection = (customerLat != null && customerLng != null)
-        ? '\n📍 *موقع الزبون المباشر على الخريطة:* https://maps.google.com/?q=$customerLat,$customerLng'
-        : '';
-
-    final deliveryText = deliveryFee == 0
-        ? 'مجاني 🎁'
-        : '${deliveryFee.toStringAsFixed(0)} د.ع';
-
-    final message = '''
-🧾 *طلب جديد - جيب لي ديلفري* 🛵
---------------------------------
-🏪 *المطعم:* $restName
---------------------------------
-👤 *اسم الزبون:* $customerName
-📞 *رقم الهاتف:* $customerPhone
-📍 *المنطقة:* $selectedNeighborhood
-🏠 *أقرب نقطة دالة:* $streetDetails$notesSection$mapLinkSection
---------------------------------
-🍔 *الوجبات المطلوبة:*
-$itemsText
---------------------------------
-💵 *مجموع الوجبات:* ${subtotal.toStringAsFixed(0)} د.ع
-🛵 *أجور التوصيل:* $deliveryText${loyaltyDiscount > 0 ? '\n🌟 *خصم النقاط:* -${loyaltyDiscount.toStringAsFixed(0)} د.ع' : ''}
-💰 *المبلغ الصافي المطلوب:* ${totalAmount.toStringAsFixed(0)} د.ع
-
-💳 *طريقة الدفع:* كاش عند الاستلام
---------------------------------
-شكراً لطلبكم عبر تطبيق جيب لي! 🚀
-''';
-
-    final uri = Uri.parse(
-        'https://wa.me/$phoneNumber?text=${Uri.encodeComponent(message)}');
-    await launchUrl(uri, mode: LaunchMode.externalApplication).catchError((e) {
-      debugPrint('Error launching WhatsApp: $e');
-      return false;
-    });
-
     // Save customer name and phone in session for future orders
     saveSession();
 
@@ -2000,6 +1943,9 @@ $itemsText
         'totalAmount': totalAmount,
         'neighborhood': selectedNeighborhood,
         'streetDetails': streetDetails,
+        'orderNotes': orderNotes,
+        'customerLat': customerLat,
+        'customerLng': customerLng,
         'status': 'pending',
         'driverName': '',
         'driverPhone': '',
@@ -5633,6 +5579,32 @@ class CheckoutScreen extends StatefulWidget {
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
   final _formKey = GlobalKey<FormState>();
+  late TextEditingController _nameController;
+  late TextEditingController _phoneController;
+  late TextEditingController _neighborhoodController;
+  late TextEditingController _streetDetailsController;
+  late TextEditingController _orderNotesController;
+
+  @override
+  void initState() {
+    super.initState();
+    final controller = JeebliProvider.of(context, listen: false);
+    _nameController = TextEditingController(text: controller.customerName);
+    _phoneController = TextEditingController(text: controller.customerPhone);
+    _neighborhoodController = TextEditingController(text: controller.selectedNeighborhood);
+    _streetDetailsController = TextEditingController(text: controller.streetDetails);
+    _orderNotesController = TextEditingController(text: controller.orderNotes);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _neighborhoodController.dispose();
+    _streetDetailsController.dispose();
+    _orderNotesController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -5736,31 +5708,46 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 child: Column(
                   children: [
                     _buildTextField(
+                        controller: _nameController,
                         label: 'الاسم الكامل',
                         icon: Icons.person_outline,
                         validator: (v) => (v == null || v.trim().isEmpty)
                             ? 'الرجاء إدخال الاسم'
                             : null,
-                        onChanged: (v) => controller.customerName = v),
+                        onChanged: (v) {
+                          controller.customerName = v;
+                          controller.saveSession();
+                        }),
                     const SizedBox(height: 12),
                     _buildTextField(
+                        controller: _phoneController,
                         label: 'رقم الهاتف',
                         icon: Icons.phone_outlined,
                         keyboardType: TextInputType.phone,
                         hint: '07800000000',
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'الرجاء إدخال الهاتف';
+                          final trimmed = v?.trim() ?? '';
+                          if (trimmed.isEmpty) {
+                            return 'يرجى كتابة رقم هاتف صحيح';
                           }
-                          if (v.length < 10) return 'رقم هاتف غير صحيح';
+                          final phoneRegex = RegExp(r'^07[578]\d{8}$');
+                          if (!phoneRegex.hasMatch(trimmed)) {
+                            return 'يرجى كتابة رقم هاتف صحيح (11 رقماً يبدأ بـ 077 أو 078 أو 075)';
+                          }
                           return null;
                         },
-                        onChanged: (v) => controller.customerPhone = v),
+                        onChanged: (v) {
+                          controller.customerPhone = v;
+                          controller.saveSession();
+                        }),
                     const SizedBox(height: 12),
                     TextFormField(
+                      controller: _neighborhoodController,
                       style: const TextStyle(color: Colors.white),
-                      onChanged: (value) =>
-                          controller.selectedNeighborhood = value,
+                      onChanged: (value) {
+                        controller.selectedNeighborhood = value;
+                        controller.saveSession();
+                      },
                       decoration: InputDecoration(
                         labelText: 'المنطقة / الحي',
                         labelStyle:
@@ -5787,14 +5774,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ),
                     const SizedBox(height: 12),
                     _buildTextField(
+                        controller: _streetDetailsController,
                         label: 'أقرب نقطة دالة',
                         icon: Icons.home_outlined,
                         validator: (v) => (v == null || v.trim().isEmpty)
                             ? 'الرجاء إدخال نقطة دالة'
                             : null,
-                        onChanged: (v) => controller.streetDetails = v),
+                        onChanged: (v) {
+                          controller.streetDetails = v;
+                          controller.saveSession();
+                        }),
                     const SizedBox(height: 12),
                     _buildTextField(
+                        controller: _orderNotesController,
                         label: 'ملاحظات الطلب (اختياري)',
                         icon: Icons.note_alt_outlined,
                         hint: 'مثال: بدون ثومية، تثقيل صوص، حار...',
@@ -5825,23 +5817,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 child: ElevatedButton.icon(
                   onPressed: () async {
                     if (!_formKey.currentState!.validate()) return;
-                    final success =
-                        await controller.confirmOrder(context);
-                    if (!context.mounted) return;
-                    if (!success) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(
-                              controller.notifications.isNotEmpty
-                                  ? controller.notifications.first.message
-                                  : 'فشل تأكيد الطلب'),
-                          behavior: SnackBarBehavior.floating,
-                          backgroundColor: Colors.red));
-                      return;
-                    }
-                    _showWhatsAppConfirmationDialog(context, controller);
+                    _showOrderReviewConfirmationDialog(context, controller);
                   },
-                  icon: const Icon(Icons.lock_outline, size: 18),
-                  label: const Text('تأكيد الطلب بأمان',
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: const Text('إرسال الطلب للمطعم 🚀',
                       style: TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 15)),
                   style: ElevatedButton.styleFrom(
@@ -5867,13 +5846,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           color: Colors.white));
 
   Widget _buildTextField(
-      {required String label,
+      {required TextEditingController controller,
+      required String label,
       required IconData icon,
       TextInputType? keyboardType,
       String? hint,
       required String? Function(String?) validator,
       required void Function(String) onChanged}) {
     return TextFormField(
+      controller: controller,
       keyboardType: keyboardType,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
@@ -5957,14 +5938,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             end: Alignment.bottomRight),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('بيانات البطاقة الائتمانية',
+            const Text('بيانات الماستركارد',
                 style: TextStyle(
-                    color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    fontSize: 13)),
+                    fontSize: 13,
+                    color: Colors.white)),
             Row(children: [
               Container(
                   width: 30,
@@ -5989,7 +5969,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             decoration: InputDecoration(
               labelText: 'رقم البطاقة',
               hintText: 'XXXX XXXX XXXX XXXX',
-              labelStyle: const TextStyle(color: Colors.white70),
+              labelStyle: const TextStyle(color: Colors.white54),
               hintStyle: const TextStyle(color: Colors.white30),
               prefixIcon: const Icon(Icons.credit_card,
                   color: Colors.white70, size: 20),
@@ -6001,14 +5981,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   borderSide: const BorderSide(color: Colors.white24)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFFFB300))),
-              counterStyle: const TextStyle(color: Colors.white30),
+                  borderSide: const BorderSide(color: Color(0xFFFF8F00))),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.07),
+              fillColor: Colors.white.withOpacity(0.05),
             ),
-            onChanged: (v) => controller.cardNumber = v,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(children: [
             Expanded(
               child: TextFormField(
@@ -6155,8 +6133,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
 
 
-  void _showWhatsAppConfirmationDialog(
+  void _showOrderReviewConfirmationDialog(
       BuildContext context, JeebliController controller) {
+    final hasGps = controller.customerLat != null && controller.customerLng != null;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -6168,40 +6147,125 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               borderRadius: BorderRadius.circular(20)),
           title: const Row(
             children: [
-              Icon(Icons.mark_chat_read_rounded,
+              Icon(Icons.assignment_turned_in_rounded,
                   color: Color(0xFFFF8F00), size: 24),
               SizedBox(width: 8),
-              Text('تأكيد إرسال الطلب 💬',
+              Text('مراجعة وتأكيد الطلب 📋',
                   style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
                       fontWeight: FontWeight.bold)),
             ],
           ),
-          content: const Text(
-            'هل قمت بإرسال الرسالة إلى المطعم عبر الواتساب؟',
-            style: TextStyle(
-                color: Colors.white70, fontSize: 13.5, height: 1.5),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'يرجى التأكد من صحة بيانات التوصيل قبل الإرسال:',
+                  style: TextStyle(color: Colors.white70, fontSize: 12.5),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.person_rounded, color: Colors.amber, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'الاسم: ${controller.customerName}',
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.phone_rounded, color: Colors.amber, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'الهاتف: ${controller.customerPhone}',
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on_rounded, color: Colors.amber, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'العنوان: ${controller.selectedNeighborhood} - ${controller.streetDetails}',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(
+                            hasGps ? Icons.gps_fixed_rounded : Icons.gps_off_rounded,
+                            color: hasGps ? Colors.greenAccent : Colors.orangeAccent,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              hasGps
+                                  ? 'موقع الخريطة: محدد بنجاح 📍'
+                                  : 'موقع الخريطة: غير محدد (سيتم التوصيل حسب العنوان المكتوب)',
+                              style: TextStyle(
+                                  color: hasGps ? Colors.greenAccent : Colors.orangeAccent,
+                                  fontSize: 11.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(color: Colors.white10, height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('المبلغ الكلي:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          Text(
+                            '${controller.totalAmount.toStringAsFixed(0)} د.ع',
+                            style: const TextStyle(
+                                color: Color(0xFFFF8F00),
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                        'ℹ️ لم يتم تفريغ السلة. يمكنك تعديل الطلب أو إعادة المحاولة.'),
-                    behavior: SnackBarBehavior.floating,
-                    backgroundColor: Colors.orange,
-                  ),
-                );
-              },
-              child: const Text('لم أرسل / تراجعت ❌',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('تعديل ✏️',
+                  style: TextStyle(color: Colors.amber, fontSize: 13, fontWeight: FontWeight.bold)),
             ),
             ElevatedButton(
               onPressed: () async {
                 Navigator.pop(ctx);
+                controller.saveSession();
                 await controller.completeOrderAndResetHome();
                 if (!context.mounted) return;
                 Navigator.pushAndRemoveUntil(
@@ -6216,8 +6280,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 );
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text(
-                        '🎉 تم تأكيد إرسال طلبك بنجاح! بالعافية والصحة.'),
+                    content: Text('🎉 تم إرسال طلبك بنجاح للمطعم! متابعة الطلب حية بأسفل الشاشة.'),
                     behavior: SnackBarBehavior.floating,
                     backgroundColor: Colors.green,
                   ),
@@ -6229,7 +6292,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Text('نعم، تم الإرسال ✅',
+              child: const Text('تأكيد وإرسال ✅',
                   style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
