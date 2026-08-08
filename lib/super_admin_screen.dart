@@ -1110,75 +1110,216 @@ class _ProductsTab extends StatelessWidget {
 // ============================================================================
 // تبويب الإشعارات في لوحة الإدارة
 // ============================================================================
-class _NotificationsTab extends StatelessWidget {
+class _NotificationsTab extends StatefulWidget {
   final JeebliController controller;
   const _NotificationsTab({required this.controller});
 
   @override
+  State<_NotificationsTab> createState() => _NotificationsTabState();
+}
+
+class _NotificationsTabState extends State<_NotificationsTab> {
+  final _promoTitleCtrl = TextEditingController();
+  final _promoBodyCtrl = TextEditingController();
+  bool _isSending = false;
+
+  @override
+  void dispose() {
+    _promoTitleCtrl.dispose();
+    _promoBodyCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final notifications = controller.notifications;
-    if (notifications.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.notifications_none_rounded, color: Colors.grey[700], size: 64),
-            const SizedBox(height: 16),
-            const Text('لا توجد إشعارات حتى الآن',
-                style: TextStyle(color: Colors.grey, fontSize: 14)),
-          ],
-        ),
-      );
-    }
-    return ListView.builder(
+    final notifications = widget.controller.notifications;
+    return ListView(
       padding: const EdgeInsets.all(16),
-      itemCount: notifications.length,
-      itemBuilder: (_, i) {
-        final n = notifications[i];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.all(12),
+      children: [
+        // ── قسم إرسال العروض الترويجية ──
+        Container(
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: n.isWarning
-                ? Colors.red.withOpacity(0.1)
-                : const Color(0xFF1E293B),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: n.isWarning
-                  ? Colors.red.withOpacity(0.3)
-                  : Colors.white.withOpacity(0.05),
+            gradient: LinearGradient(
+              colors: [Colors.amber.withOpacity(0.12), Colors.orange.withOpacity(0.06)],
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
             ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.amber.withOpacity(0.3)),
           ),
-          child: Row(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                n.isWarning ? Icons.warning_amber_rounded : Icons.notifications_rounded,
-                color: n.isWarning ? Colors.red[300] : Colors.amber,
-                size: 18,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(n.message,
-                        style: TextStyle(
-                            color: n.isWarning ? Colors.red[200] : Colors.white70,
-                            fontSize: 12.5,
-                            height: 1.4)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${n.time.hour}:${n.time.minute.toString().padLeft(2, '0')}',
-                      style: const TextStyle(color: Colors.grey, fontSize: 10),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                  ],
+                    child: const Icon(Icons.campaign_rounded, color: Colors.amber, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('📢 إرسال عرض ترويجي', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16)),
+                        SizedBox(height: 2),
+                        Text('سيصل لجميع المستخدمين حتى لو كان التطبيق مغلقاً!', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _promoTitleCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'عنوان العرض (مثال: 🔥 خصم 20% على جميع الوجبات!)',
+                  hintStyle: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  prefixIcon: const Icon(Icons.title_rounded, color: Colors.amber, size: 20),
+                  filled: true,
+                  fillColor: const Color(0xFF0F172A),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.amber)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _promoBodyCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: 'تفاصيل العرض (مثال: لفترة محدودة فقط! اطلب الآن واستمتع بخصم حصري...)',
+                  hintStyle: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  prefixIcon: const Padding(
+                    padding: EdgeInsets.only(bottom: 40),
+                    child: Icon(Icons.description_rounded, color: Colors.amber, size: 20),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF0F172A),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.amber)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  onPressed: _isSending ? null : () async {
+                    final title = _promoTitleCtrl.text.trim();
+                    final body = _promoBodyCtrl.text.trim();
+                    if (title.isEmpty || body.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('❗ يرجى كتابة العنوان والتفاصيل'), backgroundColor: Colors.red),
+                      );
+                      return;
+                    }
+                    setState(() => _isSending = true);
+                    final success = await sendOneSignalBroadcast(title: title, body: body);
+                    setState(() => _isSending = false);
+                    if (context.mounted) {
+                      if (success) {
+                        _promoTitleCtrl.clear();
+                        _promoBodyCtrl.clear();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('✅ تم إرسال العرض لجميع المستخدمين بنجاح!'), backgroundColor: Colors.green),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('❌ فشل الإرسال، تحقق من اتصال الإنترنت'), backgroundColor: Colors.red),
+                        );
+                      }
+                    }
+                  },
+                  icon: _isSending
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.send_rounded, size: 20),
+                  label: Text(_isSending ? 'جاري الإرسال...' : '📤 إرسال العرض لجميع المستخدمين',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber,
+                    foregroundColor: Colors.black87,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
               ),
             ],
           ),
-        );
-      },
+        ),
+        const SizedBox(height: 20),
+        // ── سجل الإشعارات السابقة ──
+        const Padding(
+          padding: EdgeInsets.only(bottom: 10),
+          child: Text('📋 سجل الإشعارات', style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold)),
+        ),
+        if (notifications.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(30),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.notifications_none_rounded, color: Colors.grey[700], size: 48),
+                const SizedBox(height: 12),
+                const Text('لا توجد إشعارات حتى الآن', style: TextStyle(color: Colors.grey, fontSize: 13)),
+              ],
+            ),
+          )
+        else
+          ...notifications.map((n) => Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: n.isWarning
+                  ? Colors.red.withOpacity(0.1)
+                  : const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: n.isWarning
+                    ? Colors.red.withOpacity(0.3)
+                    : Colors.white.withOpacity(0.05),
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  n.isWarning ? Icons.warning_amber_rounded : Icons.notifications_rounded,
+                  color: n.isWarning ? Colors.red[300] : Colors.amber,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(n.message,
+                          style: TextStyle(
+                              color: n.isWarning ? Colors.red[200] : Colors.white70,
+                              fontSize: 12.5,
+                              height: 1.4)),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${n.time.hour}:${n.time.minute.toString().padLeft(2, '0')}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )),
+      ],
     );
   }
 }

@@ -55,6 +55,36 @@ Future<void> sendOneSignalPush({
   }
 }
 
+/// ─── إرسال إشعار ترويجي لجميع مستخدمي التطبيق ────────────────────────────
+Future<bool> sendOneSignalBroadcast({
+  required String title,
+  required String body,
+}) async {
+  try {
+    final response = await http.post(
+      Uri.parse('https://onesignal.com/api/v1/notifications'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Basic $_kOneSignalRestKey',
+      },
+      body: jsonEncode({
+        'app_id': _kOneSignalAppId,
+        'included_segments': ['Subscribed Users'],
+        'headings': {'en': title, 'ar': title},
+        'contents': {'en': body, 'ar': body},
+        'priority': 10,
+        'android_channel_id': 'jeebli_orders_channel',
+        'data': {'screen': 'promo'},
+      }),
+    );
+    debugPrint('📢 OneSignal Broadcast sent! Status: ${response.statusCode}');
+    return response.statusCode == 200;
+  } catch (e) {
+    debugPrint('❌ OneSignal Broadcast error: $e');
+    return false;
+  }
+}
+
 /// ─── FCM Background Handler (يجب أن يكون Top-level function) ───────────────
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
