@@ -7327,6 +7327,8 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           const SizedBox(height: 16),
           _buildVendorAnalyticsCard(context, controller, controller.userRestaurantId ?? 'akkala'),
           const SizedBox(height: 18),
+          _buildManageDriversCard(context, controller),
+          const SizedBox(height: 18),
           // ─── عرض مطعم صاحبه فقط حسب الـ ID ───
           Builder(builder: (ctx) {
             final myId = controller.userRestaurantId ?? '';
@@ -7355,6 +7357,48 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             return _buildRestSection(ctx, controller, myId, myRest.first.name);
           }),
         ],
+      ),
+    );
+  }
+
+  /// 🛵 بطاقة إدارة المندوبين
+  Widget _buildManageDriversCard(BuildContext context, JeebliController controller) {
+    return InkWell(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (ctx) => ManageDriversScreen(restaurantId: controller.userRestaurantId ?? '')));
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.lightBlueAccent.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.two_wheeler_rounded, color: Colors.lightBlueAccent, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('إدارة المندوبين', style: TextStyle(color: Colors.lightBlueAccent, fontWeight: FontWeight.bold, fontSize: 14)),
+                  SizedBox(height: 4),
+                  Text('عرض المندوبين الخاصين بك، تعديل بياناتهم، أو حذفهم', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, color: Colors.lightBlueAccent, size: 14),
+          ],
+        ),
       ),
     );
   }
@@ -8194,6 +8238,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   'name': dName,
                                                   'phone': dPhone,
                                                   'password': dPass,
+                                                  'restaurantId': controller.userRestaurantId ?? '',
                                                 }, SetOptions(merge: true));
 
                                                 // 🔔 إشعار للزبون عبر OneSignal
@@ -10661,6 +10706,226 @@ class CustomAppImage extends StatelessWidget {
       height: height,
       color: const Color(0xFF0F172A),
       child: const Icon(Icons.fastfood_rounded, color: Colors.white24, size: 40),
+    );
+  }
+}
+
+/// ============================================================================
+/// شاشة إدارة المندوبين (لصاحب المطعم)
+/// ============================================================================
+class ManageDriversScreen extends StatefulWidget {
+  final String restaurantId;
+  const ManageDriversScreen({super.key, required this.restaurantId});
+
+  @override
+  State<ManageDriversScreen> createState() => _ManageDriversScreenState();
+}
+
+class _ManageDriversScreenState extends State<ManageDriversScreen> {
+  Future<void> _deleteDriver(String driverPhone) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('تأكيد الحذف', style: TextStyle(color: Colors.white)),
+          content: const Text('هل أنت متأكد من حذف هذا المندوب نهائياً؟\n\n(لن يتمكن من تسجيل الدخول بعد الآن)', style: TextStyle(color: Colors.white70)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف', style: TextStyle(color: Colors.redAccent))),
+          ],
+        ),
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await FirebaseFirestore.instance.collection('admin_credentials').doc(driverPhone).delete();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✅ تم حذف المندوب بنجاح'), backgroundColor: Colors.green),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('❌ خطأ في الحذف: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _editDriver(Map<String, dynamic> driverData, String docId) async {
+    final nameCtrl = TextEditingController(text: driverData['name']);
+    final passCtrl = TextEditingController(text: driverData['password']);
+    bool isSaving = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(builder: (context, setStateDialog) {
+        return Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF1E293B),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('تعديل بيانات المندوب', style: TextStyle(color: Colors.lightBlueAccent)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'اسم المندوب',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.lightBlueAccent)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: passCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'كلمة المرور',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.lightBlueAccent)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text('ملاحظة: لا يمكن تغيير رقم هاتف المندوب، احذفه وأضفه من جديد برقم آخر إذا أردت.', style: TextStyle(color: Colors.white38, fontSize: 10)),
+              ],
+            ),
+            actions: [
+              if (!isSaving)
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+              ElevatedButton(
+                onPressed: isSaving ? null : () async {
+                  final n = nameCtrl.text.trim();
+                  final p = passCtrl.text.trim();
+                  if (n.isEmpty || p.isEmpty) return;
+                  setStateDialog(() => isSaving = true);
+                  try {
+                    await FirebaseFirestore.instance.collection('admin_credentials').doc(docId).update({
+                      'name': n,
+                      'password': p,
+                    });
+                    if (mounted) Navigator.pop(ctx);
+                  } catch (e) {
+                    setStateDialog(() => isSaving = false);
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.lightBlueAccent, foregroundColor: Colors.black87),
+                child: isSaving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.black87, strokeWidth: 2)) : const Text('حفظ'),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E293B),
+        title: const Text('إدارة المندوبين', style: TextStyle(color: Colors.white, fontSize: 16)),
+        leading: const JeebliBackButton(),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('admin_credentials')
+            .where('role', isEqualTo: 'driver')
+            .where('restaurantId', isEqualTo: widget.restaurantId)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: Colors.lightBlueAccent));
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.two_wheeler_rounded, size: 64, color: Colors.white24),
+                  SizedBox(height: 16),
+                  Text('لا يوجد مندوبين مسجلين لهذا المطعم', style: TextStyle(color: Colors.white54, fontSize: 16)),
+                  SizedBox(height: 8),
+                  Text('يمكنك تعيين المندوبين أثناء قبول الطلبات الجديدة.', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                ],
+              ),
+            );
+          }
+
+          final docs = snapshot.data!.docs;
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final data = docs[index].data() as Map<String, dynamic>;
+              final name = data['name'] ?? 'بدون اسم';
+              final phone = data['phone'] ?? docs[index].id;
+              final password = data['password'] ?? '---';
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.lightBlueAccent.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.person_outline_rounded, color: Colors.lightBlueAccent, size: 24),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                          const SizedBox(height: 4),
+                          Text('📞 $phone', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                          const SizedBox(height: 2),
+                          Text('🔑 $password', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      children: [
+                        IconButton(
+                          onPressed: () => _editDriver(data, docs[index].id),
+                          icon: const Icon(Icons.edit_rounded, color: Colors.amber, size: 20),
+                          tooltip: 'تعديل',
+                        ),
+                        IconButton(
+                          onPressed: () => _deleteDriver(docs[index].id),
+                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                          tooltip: 'حذف',
+                        ),
+                      ],
+                    )
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
