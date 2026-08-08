@@ -128,11 +128,11 @@ class _CustomerPhoneLoginScreenState extends State<CustomerPhoneLoginScreen> {
                 textAlign: TextAlign.center,
                 decoration: InputDecoration(
                   hintText: '07X XXXX XXXX',
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.2), letterSpacing: 2),
+                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2), letterSpacing: 2),
                   filled: true,
                   fillColor: const Color(0xFF1E293B),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.white.withOpacity(0.05))),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Colors.amber)),
                   prefixIcon: const Icon(Icons.phone_android_rounded, color: Colors.amber),
                 ),
@@ -236,7 +236,7 @@ class _CustomerOtpScreenState extends State<CustomerOtpScreen> {
                   filled: true,
                   fillColor: const Color(0xFF1E293B),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.white.withOpacity(0.05))),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Colors.amber)),
                 ),
                 onChanged: (v) {

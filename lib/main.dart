@@ -791,6 +791,7 @@ class JeebliController extends ChangeNotifier {
       if (savedOrderId != null && savedOrderId.isNotEmpty) {
         activeOrderId = savedOrderId;
       }
+      unreadNotifications = prefs.getInt('unread_notifications') ?? 0;
 
       // بمجرد تحميل المعرف، نجلب الطلبات النشطة للاستماع لها فوراً
       _recoverActiveOrders();
@@ -848,6 +849,7 @@ class JeebliController extends ChangeNotifier {
       } else {
         await prefs.remove('active_order_id');
       }
+      await prefs.setInt('unread_notifications', unreadNotifications);
     } catch (e) {
       debugPrint('Session save note: $e');
     }
@@ -855,6 +857,9 @@ class JeebliController extends ChangeNotifier {
 
   void logout() async {
     _deliveryTimer?.cancel();
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('is_logged_in');
@@ -2035,6 +2040,7 @@ class JeebliController extends ChangeNotifier {
 
   void markNotificationsRead() {
     unreadNotifications = 0;
+    saveSession();
     notifyListeners();
   }
 
@@ -3164,7 +3170,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
                   return ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: firestoreDocs.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (context, index) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final data = firestoreDocs[index].data()
                           as Map<String, dynamic>;
@@ -3182,7 +3188,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
                 return ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: localNotifs.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (context, index) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final notif = localNotifs[index];
                     return _buildNotifTile(
@@ -3583,8 +3589,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                         ),
                       ),
                     ),
-                  if (controller.orderStatus != OrderStatus.idle &&
-                      controller.orderStatus != OrderStatus.rated)
+                  if (controller.activeOrderId != null)
                     _buildActiveOrderBanner(controller),
                 ],
               ),
@@ -5686,12 +5691,22 @@ class CartScreen extends StatelessWidget {
             width: double.infinity,
             height: 50,
             child: ElevatedButton(
-              onPressed: () => Navigator.push(
+              onPressed: () {
+                if (!controller.isLoggedIn) {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomerPhoneLoginScreen()));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('يرجى تسجيل الدخول برقم الهاتف أولاً لإتمام طلبك'),
+                    backgroundColor: Colors.orange,
+                  ));
+                  return;
+                }
+                Navigator.push(
                   context,
                   MaterialPageRoute(
                       builder: (_) => const Directionality(
                           textDirection: TextDirection.rtl,
-                          child: CheckoutScreen()))),
+                          child: CheckoutScreen())));
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF8F00),
                 foregroundColor: Colors.white,
@@ -9300,20 +9315,17 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                       fontSize: 10.5,
                       fontWeight: FontWeight.bold)),
             ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildStatCard(context, 'طلب', orderCount.toString(),
-                    Icons.shopping_bag_outlined),
-                if (controller.loyaltySystemEnabled) ...[
-                  const SizedBox(width: 12),
-                  _buildStatCard(context, 'نقطة 🌟', controller.loyaltyPoints.toString(),
-                      Icons.stars_rounded),
+            if (controller.loyaltySystemEnabled) ...[
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildStatCard(context, 'نقطة 🌟', controller.loyaltyPoints.toString(), Icons.stars_rounded),
                 ],
-              ],
-            ),
-            const SizedBox(height: 20),
+              ),
+              const SizedBox(height: 20),
+            ] else
+              const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
@@ -9344,8 +9356,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
             const SizedBox(height: 16),
             if (controller.loyaltySystemEnabled) _buildLoyaltyCard(controller),
             if (controller.loyaltySystemEnabled) const SizedBox(height: 16),
-            _buildOrderHistorySection(context, controller),
-            const SizedBox(height: 20),
             Container(
               decoration: BoxDecoration(
                 color: controller.cardColor,
@@ -10782,7 +10792,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                       'name': n,
                       'password': p,
                     });
-                    if (mounted) Navigator.pop(ctx);
+                    if (ctx.mounted) Navigator.pop(ctx);
                   } catch (e) {
                     setStateDialog(() => isSaving = false);
                   }
