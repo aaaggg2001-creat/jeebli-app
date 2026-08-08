@@ -5579,21 +5579,25 @@ class CheckoutScreen extends StatefulWidget {
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
   final _formKey = GlobalKey<FormState>();
-  late TextEditingController _nameController;
-  late TextEditingController _phoneController;
-  late TextEditingController _neighborhoodController;
-  late TextEditingController _streetDetailsController;
-  late TextEditingController _orderNotesController;
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _neighborhoodController = TextEditingController();
+  final TextEditingController _streetDetailsController = TextEditingController();
+  final TextEditingController _orderNotesController = TextEditingController();
+  bool _initialized = false;
 
   @override
-  void initState() {
-    super.initState();
-    final controller = JeebliProvider.of(context, listen: false);
-    _nameController = TextEditingController(text: controller.customerName);
-    _phoneController = TextEditingController(text: controller.customerPhone);
-    _neighborhoodController = TextEditingController(text: controller.selectedNeighborhood);
-    _streetDetailsController = TextEditingController(text: controller.streetDetails);
-    _orderNotesController = TextEditingController(text: controller.orderNotes);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initialized) {
+      final controller = JeebliProvider.of(context);
+      _nameController.text = controller.customerName;
+      _phoneController.text = controller.customerPhone;
+      _neighborhoodController.text = controller.selectedNeighborhood;
+      _streetDetailsController.text = controller.streetDetails;
+      _orderNotesController.text = controller.orderNotes;
+      _initialized = true;
+    }
   }
 
   @override
