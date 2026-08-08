@@ -1866,7 +1866,10 @@ class JeebliController extends ChangeNotifier {
         'isOwnerNotification': isOwnerNotification,
         'isRead': false,
         'createdAt': FieldValue.serverTimestamp(),
-      }).catchError((e) => debugPrint('Notification Firestore save error: $e'));
+      }).catchError((e) {
+        debugPrint('Notification Firestore save error: $e');
+        return <String, dynamic>{} as dynamic;
+      });
     }
   }
 
@@ -4067,18 +4070,15 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                 Builder(builder: (ctx) {
                   final driverLat = data['driverLat'] as double?;
                   final driverLng = data['driverLng'] as double?;
-                  final custLat = controller.customerLat;
-                  final custLng = controller.customerLng;
-                  final hasLive = driverLat != null && driverLng != null;
+                  final controller2 = JeebliProvider.of(ctx);
+                  final custLat = controller2.customerLat;
+                  final custLng = controller2.customerLng;
 
-                  String? distanceText;
-                  if (hasLive && custLat != null && custLng != null) {
-                    final meters = Geolocator.distanceBetween(
-                        custLat, custLng, driverLat, driverLng);
-                    distanceText = meters < 1000
-                        ? 'على بُعد ${meters.toStringAsFixed(0)} متر منك'
-                        : 'على بُعد ${(meters / 1000).toStringAsFixed(1)} كم منك';
+                  double? distanceMeters;
+                  if (driverLat != null && driverLng != null && custLat != null && custLng != null) {
+                    distanceMeters = Geolocator.distanceBetween(custLat, custLng, driverLat, driverLng);
                   }
+                  final hasLiveLocation = driverLat != null && driverLng != null;
 
                   return Container(
                     margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
@@ -4098,50 +4098,34 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                 shape: BoxShape.circle,
                                 color: Colors.lightBlueAccent.withOpacity(0.15),
                               ),
-                              child: const Icon(Icons.person_pin_circle_rounded,
-                                  color: Colors.lightBlueAccent, size: 24),
+                              child: const Icon(Icons.person_pin_circle_rounded, color: Colors.lightBlueAccent, size: 24),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('🛵 المندوب',
-                                      style: TextStyle(
-                                          color: Colors.white54, fontSize: 10)),
-                                  Text(driverName,
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14)),
-                                  if (hasLive)
+                                  const Text('🛵 المندوب', style: TextStyle(color: Colors.white54, fontSize: 10)),
+                                  Text(driverName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                                  if (hasLiveLocation)
                                     Row(children: [
                                       Container(
-                                        width: 6,
-                                        height: 6,
-                                        margin: const EdgeInsets.only(
-                                            right: 5, top: 3),
+                                        width: 6, height: 6,
+                                        margin: const EdgeInsets.only(right: 4),
                                         decoration: const BoxDecoration(
                                           shape: BoxShape.circle,
                                           color: Colors.greenAccent,
                                         ),
                                       ),
-                                      Expanded(
-                                        child: Text(
-                                          distanceText ?? 'التتبع الحي نشط 🟢',
-                                          style: const TextStyle(
-                                              color: Colors.greenAccent,
-                                              fontSize: 10.5,
-                                              fontWeight: FontWeight.w500),
-                                        ),
+                                      Text(
+                                        distanceMeters != null
+                                            ? (distanceMeters < 1000
+                                                ? 'على بُعد ${distanceMeters.toStringAsFixed(0)} متر منك'
+                                                : 'على بُعد ${(distanceMeters / 1000).toStringAsFixed(1)} كم منك')
+                                            : 'التتبع الحي نشط 🟢',
+                                        style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.w500),
                                       ),
-                                    ])
-                                  else
-                                    const Text(
-                                      '⏳ في انتظار بيانات الموقع...',
-                                      style: TextStyle(
-                                          color: Colors.white38, fontSize: 10),
-                                    ),
+                                    ]),
                                 ],
                               ),
                             ),
@@ -4152,62 +4136,42 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                   if (await canLaunchUrl(uri)) launchUrl(uri);
                                 },
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                   decoration: BoxDecoration(
-                                    color:
-                                        Colors.lightBlueAccent.withOpacity(0.2),
+                                    color: Colors.lightBlueAccent.withOpacity(0.2),
                                     borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                        color: Colors.lightBlueAccent
-                                            .withOpacity(0.5)),
+                                    border: Border.all(color: Colors.lightBlueAccent.withOpacity(0.5)),
                                   ),
                                   child: const Row(children: [
-                                    Icon(Icons.call_rounded,
-                                        color: Colors.lightBlueAccent, size: 16),
+                                    Icon(Icons.call_rounded, color: Colors.lightBlueAccent, size: 16),
                                     SizedBox(width: 4),
-                                    Text('اتصال',
-                                        style: TextStyle(
-                                            color: Colors.lightBlueAccent,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold)),
+                                    Text('اتصال', style: TextStyle(color: Colors.lightBlueAccent, fontSize: 12, fontWeight: FontWeight.bold)),
                                   ]),
                                 ),
                               ),
                           ],
                         ),
-                        // ─── زر تتبع على الخريطة (يظهر فقط عند وجود موقع المندوب) ───
-                        if (hasLive) ...[
+                        if (hasLiveLocation) ...[
                           const SizedBox(height: 10),
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
                               onPressed: () async {
-                                final String mapUrl =
-                                    custLat != null && custLng != null
-                                        ? 'https://maps.google.com/maps?saddr=$custLat,$custLng&daddr=$driverLat,$driverLng'
-                                        : 'https://maps.google.com/?q=$driverLat,$driverLng';
+                                // فتح خريطة تعرض موقع المندوب والزبون في نفس الوقت
+                                final String mapUrl = custLat != null && custLng != null
+                                    ? 'https://maps.google.com/maps?saddr=$custLat,$custLng&daddr=$driverLat,$driverLng&mode=driving'
+                                    : 'https://maps.google.com/?q=$driverLat,$driverLng';
                                 final uri = Uri.parse(mapUrl);
                                 if (await canLaunchUrl(uri)) {
-                                  launchUrl(uri,
-                                      mode: LaunchMode.externalApplication);
+                                  launchUrl(uri, mode: LaunchMode.externalApplication);
                                 }
                               },
-                              icon: const Icon(Icons.near_me_rounded,
-                                  size: 16, color: Color(0xFFFF8F00)),
-                              label: const Text('🗺️ تتبع المندوب على الخريطة',
-                                  style: TextStyle(
-                                      color: Color(0xFFFF8F00),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold)),
+                              icon: const Icon(Icons.near_me_rounded, size: 16, color: Color(0xFFFF8F00)),
+                              label: const Text('🗺️ تتبع المندوب على الخريطة', style: TextStyle(color: Color(0xFFFF8F00), fontSize: 12, fontWeight: FontWeight.bold)),
                               style: OutlinedButton.styleFrom(
-                                side: BorderSide(
-                                    color: const Color(0xFFFF8F00)
-                                        .withOpacity(0.5)),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10)),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 8),
+                                side: BorderSide(color: const Color(0xFFFF8F00).withOpacity(0.5)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(vertical: 8),
                               ),
                             ),
                           ),
@@ -4257,7 +4221,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       perm = await Geolocator.requestPermission();
     }
     if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) return;
+        perm == LocationPermission.deniedForever) { return; }
 
     const settings = LocationSettings(
       accuracy: LocationAccuracy.high,
