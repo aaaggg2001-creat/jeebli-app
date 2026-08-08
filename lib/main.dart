@@ -15,7 +15,45 @@ import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'super_admin_screen.dart';
+
+// ─── OneSignal Config ──────────────────────────────────────────────────────
+const String _kOneSignalAppId = '43a24efe-0d39-453f-8b14-1c3a6282c230';
+const String _kOneSignalRestKey = 'os_v2_app_iore57qnhfct7cyudq5gfawcgat657gcghhuizm565y42brttgdfspecp5gpnbgykubv6gabyz63svr6nqkvd4gk64yj4nvws5gtxba';
+
+/// إرسال Push Notification عبر OneSignal REST API
+/// يعمل حتى والتطبيق مغلق تماماً
+Future<void> sendOneSignalPush({
+  required String playerId,
+  required String title,
+  required String body,
+  Map<String, String> data = const {},
+}) async {
+  if (playerId.isEmpty) return;
+  try {
+    await http.post(
+      Uri.parse('https://onesignal.com/api/v1/notifications'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Basic $_kOneSignalRestKey',
+      },
+      body: jsonEncode({
+        'app_id': _kOneSignalAppId,
+        'include_player_ids': [playerId],
+        'headings': {'en': title, 'ar': title},
+        'contents': {'en': body, 'ar': body},
+        'priority': 10,
+        'android_channel_id': 'jeebli_orders_channel',
+        'data': data,
+      }),
+    );
+    debugPrint('✅ OneSignal Push sent to: $playerId');
+  } catch (e) {
+    debugPrint('❌ OneSignal error: $e');
+  }
+}
 
 /// ─── FCM Background Handler (يجب أن يكون Top-level function) ───────────────
 @pragma('vm:entry-point')
@@ -185,6 +223,10 @@ void main() async {
 
     // ── تهيئة نظام الإشعارات ──────────────────────────────────────
     await jeebliNotifications.initialize();
+
+    // ── تهيئة OneSignal للإشعارات حتى والتطبيق مغلق ──────────────
+    OneSignal.initialize(_kOneSignalAppId);
+    OneSignal.Notifications.requestPermission(true);
   } catch (e) {
     debugPrint('Firebase init note: $e');
   }
@@ -722,9 +764,11 @@ class JeebliController extends ChangeNotifier {
       // بمجرد تحميل المعرف، نجلب الطلبات النشطة للاستماع لها فوراً
       _recoverActiveOrders();
 
-      // ── حفظ FCM Token في Firestore ───────────────────────────────
+      // ── حفظ FCM Token + OneSignal Player ID في Firestore ────────────────
       if (deviceUid.isNotEmpty) {
         jeebliNotifications.saveFcmTokenToFirestore(deviceUid);
+        // حفظ OneSignal Player ID لإرسال الإشعارات حتى والتطبيق مغلق
+        _saveOneSignalPlayerId(deviceUid);
       }
     } catch (e) {
       debugPrint('Session load note: $e');
@@ -732,6 +776,24 @@ class JeebliController extends ChangeNotifier {
       // ✅ انتهى التحميل — أعلم الـ UI ليعرض الشاشة الصحيحة
       _isSessionLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// حفظ OneSignal Player ID في Firestore
+  Future<void> _saveOneSignalPlayerId(String uid) async {
+    try {
+      final playerId = OneSignal.User.pushSubscription.id;
+      if (playerId == null || playerId.isEmpty) return;
+      await FirebaseFirestore.instance
+          .collection('onesignal_players')
+          .doc(uid)
+          .set({
+        'playerId': playerId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('✅ OneSignal Player ID saved: $playerId');
+    } catch (e) {
+      debugPrint('OneSignal save error: $e');
     }
   }
 
@@ -1055,6 +1117,64 @@ class JeebliController extends ChangeNotifier {
   bool isLocating = false;
   double? customerLat;
   double? customerLng;
+
+  /// ═══ إرسال إشعار OneSignal لصاحب المطعم عند طلب جديد ═══
+  Future<void> _notifyOwnerNewOrder({
+    required String restaurantId,
+    required String customerName,
+    required double totalAmount,
+    required String orderId,
+  }) async {
+    try {
+      if (restaurantId.isEmpty) return;
+      // جلب Player ID لصاحب المطعم من Firestore
+      final restDoc = await FirebaseFirestore.instance
+          .collection('restaurants')
+          .doc(restaurantId)
+          .get();
+      if (!restDoc.exists) return;
+      final ownerUid = restDoc.data()?['ownerDeviceUid'] ?? '';
+      if (ownerUid.isEmpty) return;
+      final playerDoc = await FirebaseFirestore.instance
+          .collection('onesignal_players')
+          .doc(ownerUid)
+          .get();
+      final playerId = playerDoc.data()?['playerId'] ?? '';
+      await sendOneSignalPush(
+        playerId: playerId,
+        title: '🔔 طلب جديد وارد!',
+        body: '$customerName | ${totalAmount.toStringAsFixed(0)} د.ع',
+        data: {'orderId': orderId, 'screen': 'orders'},
+      );
+    } catch (e) {
+      debugPrint('Notify owner error: $e');
+    }
+  }
+
+  /// ═══ إرسال إشعار OneSignal للزبون عند تغيير حالة طلبه ═══
+  Future<void> _notifyCustomer({
+    required String custDeviceUid,
+    required String title,
+    required String body,
+    required String orderId,
+  }) async {
+    try {
+      if (custDeviceUid.isEmpty) return;
+      final playerDoc = await FirebaseFirestore.instance
+          .collection('onesignal_players')
+          .doc(custDeviceUid)
+          .get();
+      final playerId = playerDoc.data()?['playerId'] ?? '';
+      await sendOneSignalPush(
+        playerId: playerId,
+        title: title,
+        body: body,
+        data: {'orderId': orderId, 'screen': 'track'},
+      );
+    } catch (e) {
+      debugPrint('Notify customer error: $e');
+    }
+  }
 
   /// ═══ المستمع الذكي للزبون - يرصد تغيرات حالة طلبه فوراً ويرسل إشعاراً خاصاً به ═══
   void startCustomerOrderListener(String orderId) {
@@ -1958,6 +2078,15 @@ class JeebliController extends ChangeNotifier {
       saveSession(); // ← احفظ activeOrderId فوراً لبقاء الكارت بعد إغلاق التطبيق
       // ★ ابدأ الاستماع لتغييرات هذا الطلب وأرسل الإشعار للزبون حصراً
       startCustomerOrderListener(orderId);
+
+      // 🔔 أرسل إشعار OneSignal لصاحب المطعم فوراً
+      _notifyOwnerNewOrder(
+        restaurantId: cartRestaurantId ?? '',
+        customerName: customerName,
+        totalAmount: totalAmount,
+        orderId: orderId,
+      );
+
       debugPrint('✅ تم حفظ الطلب في Firestore: $orderId');
     } catch (e) {
       debugPrint('❌ خطأ في حفظ الطلب: $e');
@@ -4664,6 +4793,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   await docRef.update({'status': 'onTheWay'});
                                   // 📍 ابدأ إرسال الموقع للزبون
                                   _startLocationTracking(docRef.id);
+                                  // 🔔 إشعار للزبون - المندوب في الطريق
+                                  final od = (await docRef.get()).data() as Map<String, dynamic>? ?? {};
+                                  if (context.mounted) {
+                                    JeebliProvider.of(context)._notifyCustomer(
+                                      custDeviceUid: od['deviceUid']?.toString() ?? '',
+                                      title: '🛵 طلبك في الطريق!',
+                                      body: '${od['driverName'] ?? 'المندوب'} في الطريق إليك الآن 🚀',
+                                      orderId: docRef.id,
+                                    );
+                                  }
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
@@ -8017,6 +8156,18 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   'phone': dPhone,
                                                   'password': dPass,
                                                 }, SetOptions(merge: true));
+
+                                                // 🔔 إشعار للزبون عبر OneSignal
+                                                final orderData = (await docRef.get()).data() as Map<String, dynamic>? ?? {};
+                                                final custUid = orderData['deviceUid']?.toString() ?? '';
+                                                if (context.mounted) {
+                                                  JeebliProvider.of(context)._notifyCustomer(
+                                                    custDeviceUid: custUid,
+                                                    title: '👨‍🍳 المطعم قبل طلبك!',
+                                                    body: 'وجبتك قيد التحضير الآن! المندوب: $dName',
+                                                    orderId: docRef.id,
+                                                  );
+                                                }
 
                                                 if (ctx.mounted) {
                                                   Navigator.pop(ctx);
