@@ -9217,7 +9217,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
         ? controller.customerName
         : 'زبون جيب لي';
     final phone = controller.customerPhone;
-    final orderCount = controller.pastOrders.length;
 
     return Scaffold(
       backgroundColor: controller.bgColor,
