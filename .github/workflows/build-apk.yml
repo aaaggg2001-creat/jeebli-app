@@ -32,13 +32,17 @@ jobs:
         run: flutter pub get
 
       - name: 🔑 Print SHA Fingerprints (for Firebase Console)
-        working-directory: android
         run: |
-          chmod +x gradlew
-          ./gradlew signingReport 2>&1 | grep -A 10 "Variant: release" || ./gradlew signingReport 2>&1 | grep -A 6 "SHA"
           echo "======================================"
-          echo "📋 All SHA fingerprints:"
-          ./gradlew signingReport 2>&1 | grep "SHA"
+          echo "🔑 SHA Fingerprints من الـ Debug Keystore:"
+          echo "======================================"
+          keytool -list -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android 2>/dev/null | grep -E "SHA1:|SHA256:"
+          echo "======================================"
+          echo "✅ انسخ الـ SHA1 والـ SHA256 وأضفهما في Firebase Console"
           echo "======================================"
 
       - name: Build APK
