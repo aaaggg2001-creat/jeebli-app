@@ -33,16 +33,23 @@ jobs:
 
       - name: 🔑 Print SHA Fingerprints (for Firebase Console)
         run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkey -v \
+              -keystore ~/.android/debug.keystore \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
           echo "======================================"
-          echo "🔑 SHA Fingerprints من الـ Debug Keystore:"
+          echo "🔑 SHA Fingerprints (أضفهما في Firebase Console):"
           echo "======================================"
           keytool -list -v \
             -keystore ~/.android/debug.keystore \
             -alias androiddebugkey \
             -storepass android \
-            -keypass android 2>/dev/null | grep -E "SHA1:|SHA256:"
-          echo "======================================"
-          echo "✅ انسخ الـ SHA1 والـ SHA256 وأضفهما في Firebase Console"
+            -keypass android | grep -E "SHA1:|SHA256:"
           echo "======================================"
 
       - name: Build APK
