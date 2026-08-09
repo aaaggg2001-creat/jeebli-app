@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -104,16 +104,14 @@ Future<void> openNativeMap({
 
   final Uri uri = Uri.parse(googleMapsUrl);
   try {
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-      return;
-    }
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    return;
   } catch (_) {}
 
   final Uri geoUri = Uri.parse('geo:$destLat,$destLng?q=$destLat,$destLng');
-  if (await canLaunchUrl(geoUri)) {
+  try {
     await launchUrl(geoUri, mode: LaunchMode.externalApplication);
-  }
+  } catch (_) {}
 }
 
 /// ─── FCM Background Handler (يجب أن يكون Top-level function) ───────────────
@@ -121,6 +119,34 @@ Future<void> openNativeMap({
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('📩 إشعار في الخلفية: ${message.notification?.title}');
+
+  final title = message.notification?.title ?? 'جيبلي 🛵';
+  final body = message.notification?.body ?? '';
+
+  final FlutterLocalNotificationsPlugin localNotifications = FlutterLocalNotificationsPlugin();
+  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const initSettings = InitializationSettings(android: androidInit);
+  await localNotifications.initialize(initSettings);
+
+  const androidDetails = AndroidNotificationDetails(
+    'jeebli_orders_channel',
+    'إشعارات الطلبات',
+    channelDescription: 'إشعارات حالة الطلبات والعروض من جيبلي',
+    importance: Importance.max,
+    priority: Priority.high,
+    icon: '@mipmap/ic_launcher',
+    playSound: true,
+    enableVibration: true,
+    styleInformation: BigTextStyleInformation(''),
+  );
+  const details = NotificationDetails(android: androidDetails);
+
+  await localNotifications.show(
+    message.messageId.hashCode,
+    title,
+    body,
+    details,
+  );
 }
 
 /// ─── خدمة الإشعارات المحلية والسحابية ──────────────────────────────────────
@@ -888,29 +914,31 @@ class JeebliController extends ChangeNotifier {
   void logout() async {
     _deliveryTimer?.cancel();
     try {
-      await FirebaseAuth.instance.signOut();
-    } catch (_) {}
-    try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('is_logged_in');
-      await prefs.remove('user_role');
-      await prefs.remove('customer_name');
-      await prefs.remove('customer_phone');
-      await prefs.remove('user_restaurant_id');
-      await prefs.remove('user_email_or_phone');
-      await prefs.remove('selected_neighborhood');
-      await prefs.remove('street_details');
+      await prefs.clear(); // Clear all
+      // Reset all state variables
+      customerName = '';
+      customerPhone = '';
+      customerAvatarUrl = '';
+      selectedNeighborhood = '';
+      streetDetails = '';
+      _cartItems.clear();
+      pastOrders.clear();
+      notifications.clear();
+      unreadNotifications = 0;
+      activeOrderId = null;
+      deviceUid = ''; // It will be recreated on next load
+      _isLoggedIn = false;
+      _userRole = null;
+      _userEmailOrPhone = null;
+      _userRestaurantId = null;
+      _activeRestaurant = null;
+      _currentTab = 0;
+      _playClickFeedback();
+      notifyListeners();
     } catch (e) {
-      debugPrint('Session clear note: $e');
+      debugPrint('Logout error: $e');
     }
-    _isLoggedIn = false;
-    _userRole = null;
-    _userEmailOrPhone = null;
-    _userRestaurantId = null;
-    _activeRestaurant = null;
-    _currentTab = 0;
-    _playClickFeedback();
-    notifyListeners();
   }
 
   // ─── حفظ وتحميل البيانات محلياً ───────────────────────────────────────
@@ -7319,6 +7347,65 @@ void showWelcomeDialog(BuildContext context, String userRole) {
 /// 14. لوحة تحكم المطعم (Restaurant Owner)
 /// ============================================================================
 
+class RestaurantOrdersNotifScreen extends StatelessWidget {
+  const RestaurantOrdersNotifScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = JeebliProvider.of(context);
+    final restId = controller.userRestaurantId ?? '';
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      appBar: AppBar(
+        title: const Text('الطلبات الواردة 🔔', style: TextStyle(color: Colors.white, fontSize: 16)),
+        backgroundColor: const Color(0xFF1E293B),
+        leading: const JeebliBackButton(),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('orders')
+          .where('restaurantId', isEqualTo: restId)
+          .where('status', isEqualTo: 'pending')
+          .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.amber));
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('لا توجد طلبات جديدة حالياً.', style: TextStyle(color: Colors.white70)));
+          }
+          final orders = snapshot.data!.docs;
+          return ListView.builder(
+            itemCount: orders.length,
+            padding: const EdgeInsets.all(16),
+            itemBuilder: (context, index) {
+              final doc = orders[index];
+              final data = doc.data() as Map<String, dynamic>;
+              final custName = data['customerName'] ?? 'مجهول';
+              final total = data['totalAmount']?.toString() ?? '0';
+              return Card(
+                color: const Color(0xFF1E293B),
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: ListTile(
+                  leading: const Icon(Icons.receipt_long, color: Colors.amber, size: 30),
+                  title: Text('طلب جديد من: $custName', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: Text('الإجمالي: $total د.ع\nرقم الطلب: ${doc.id.substring(0, 6)}', style: const TextStyle(color: Colors.white70)),
+                  trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
+                  isThreeLine: true,
+                  onTap: () {
+                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الرجاء الذهاب إلى لوحة التحكم لقبول الطلب.')));
+                  },
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// ============================================================================
+
 class RestaurantOwnerAdminScreen extends StatelessWidget {
   const RestaurantOwnerAdminScreen({super.key});
 
@@ -7338,6 +7425,36 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
         backgroundColor: const Color(0xFF1E293B),
         elevation: 0,
         actions: [
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('orders')
+              .where('restaurantId', isEqualTo: controller.userRestaurantId)
+              .where('status', isEqualTo: 'pending')
+              .snapshots(),
+            builder: (context, snapshot) {
+              int pendingCount = 0;
+              if (snapshot.hasData) pendingCount = snapshot.data!.docs.length;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_active_rounded, color: Colors.amber),
+                    tooltip: 'الطلبات الواردة',
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RestaurantOrdersNotifScreen())),
+                  ),
+                  if (pendingCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                        child: Text('$pendingCount', style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    )
+                ],
+              );
+            }
+          ),
           IconButton(
             icon: const Icon(Icons.edit_note_rounded, color: Colors.amber),
             tooltip: 'تعديل بيانات المطعم',
