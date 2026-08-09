@@ -48,6 +48,10 @@ Future<void> sendOneSignalPush({
         'contents': {'en': body, 'ar': body},
         'priority': 10,
         'android_channel_id': 'jeebli_orders_channel',
+        'android_sound': 'notification',
+        'android_accent_color': 'FFFF8F00',
+        'android_visibility': 1,
+        'content_available': true,
         'data': data,
       }),
     );
@@ -1981,6 +1985,16 @@ class JeebliController extends ChangeNotifier {
     HapticFeedback.lightImpact();
   }
 
+  void playOrderAlarmSound() {
+    for (int i = 0; i < 6; i++) {
+      Future.delayed(Duration(milliseconds: i * 350), () {
+        SystemSound.play(SystemSoundType.alert);
+        HapticFeedback.vibrate();
+        HapticFeedback.heavyImpact();
+      });
+    }
+  }
+
   void _playClickFeedback() {
     SystemSound.play(SystemSoundType.click);
     HapticFeedback.lightImpact();
@@ -3173,14 +3187,28 @@ class CustomerNotificationsScreen extends StatelessWidget {
                     itemCount: firestoreDocs.length,
                     separatorBuilder: (context, index) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      final data = firestoreDocs[index].data()
-                          as Map<String, dynamic>;
+                      final doc = firestoreDocs[index];
+                      final data = doc.data() as Map<String, dynamic>;
                       final message = data['message'] as String? ?? '';
                       final isWarning = data['isWarning'] as bool? ?? false;
                       final ts = data['createdAt'] as Timestamp?;
                       final time = ts?.toDate() ?? DateTime.now();
-                      return _buildNotifTile(
-                          controller, message, isWarning, time);
+                      return Dismissible(
+                        key: Key(doc.id),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 20),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                        ),
+                        onDismissed: (_) => doc.reference.delete(),
+                        child: _buildNotifTile(
+                            controller, message, isWarning, time, docRef: doc.reference),
+                      );
                     },
                   );
                 }
@@ -3226,7 +3254,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
   }
 
   Widget _buildNotifTile(JeebliController controller, String message,
-      bool isWarning, DateTime time) {
+      bool isWarning, DateTime time, {DocumentReference? docRef}) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -3278,6 +3306,12 @@ class CustomerNotificationsScreen extends StatelessWidget {
               ],
             ),
           ),
+          if (docRef != null)
+            IconButton(
+              icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.white38),
+              onPressed: () => docRef.delete(),
+              tooltip: 'حذف الإشعار',
+            ),
         ],
       ),
     );
@@ -4199,22 +4233,32 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                             Expanded(
                               child: Column(
                                 children: [
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 400),
-                                    width: isCurrent ? 40 : 32,
-                                    height: isCurrent ? 40 : 32,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: isActive ? headerColor.withOpacity(0.2) : Colors.white.withOpacity(0.05),
-                                      border: Border.all(
-                                        color: isActive ? headerColor : Colors.white12,
-                                        width: isCurrent ? 2.5 : 1.5,
+                                  InkWell(
+                                    onTap: () async {
+                                      openNativeMap(
+                                        destLat: data['driverLat'] as double?,
+                                        destLng: data['driverLng'] as double?,
+                                        originLat: JeebliProvider.of(context).customerLat,
+                                        originLng: JeebliProvider.of(context).customerLng,
+                                      );
+                                    },
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 400),
+                                      width: isCurrent ? 40 : 32,
+                                      height: isCurrent ? 40 : 32,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isActive ? headerColor.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+                                        border: Border.all(
+                                          color: isActive ? headerColor : Colors.white12,
+                                          width: isCurrent ? 2.5 : 1.5,
+                                        ),
                                       ),
-                                    ),
-                                    child: Icon(
-                                      stepsInfo[i]['icon'] as IconData,
-                                      size: isCurrent ? 20 : 15,
-                                      color: isActive ? headerColor : Colors.white24,
+                                      child: Icon(
+                                        stepsInfo[i]['icon'] as IconData,
+                                        size: isCurrent ? 20 : 15,
+                                        color: isActive ? headerColor : Colors.white24,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -4332,14 +4376,11 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                             width: double.infinity,
                             child: OutlinedButton.icon(
                               onPressed: () async {
-                                // فتح خريطة تعرض موقع المندوب والزبون في نفس الوقت
-                                final String mapUrl = custLat != null && custLng != null
-                                    ? 'https://maps.google.com/maps?saddr=$custLat,$custLng&daddr=$driverLat,$driverLng&mode=driving'
-                                    : 'https://maps.google.com/?q=$driverLat,$driverLng';
-                                final uri = Uri.parse(mapUrl);
-                                if (await canLaunchUrl(uri)) {
-                                  launchUrl(uri, mode: LaunchMode.externalApplication);
-                                }
+                                openNativeMap(
+                                    destLat: driverLat,
+                                    destLng: driverLng,
+                                    originLat: custLat,
+                                    originLng: custLng);
                               },
                               icon: const Icon(Icons.near_me_rounded, size: 16, color: Color(0xFFFF8F00)),
                               label: const Text('🗺️ تتبع المندوب على الخريطة', style: TextStyle(color: Color(0xFFFF8F00), fontSize: 12, fontWeight: FontWeight.bold)),
@@ -4427,6 +4468,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     }
     if (currentCount > _prevOrderCount) {
       // 🔔 طلب جديد وصل!
+      if (mounted) {
+        JeebliProvider.of(context).playOrderAlarmSound();
+      }
       jeebliNotifications.showOrderNotification(
         id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
         title: '🛵 لديك طلب توصيل جديد!',
@@ -4745,12 +4789,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                     width: double.infinity,
                                     child: OutlinedButton.icon(
                                       onPressed: () async {
-                                        final mapUri = Uri.parse(
-                                          'https://maps.google.com/?q=$custLat,$custLng',
-                                        );
-                                        if (await canLaunchUrl(mapUri)) {
-                                          launchUrl(mapUri, mode: LaunchMode.externalApplication);
-                                        }
+                                        openNativeMap(destLat: custLat, destLng: custLng);
                                       },
                                       icon: const Icon(Icons.map_rounded, size: 16, color: Color(0xFFFF8F00)),
                                       label: const Text('📍 فتح موقع الزبون على الخريطة', style: TextStyle(color: Color(0xFFFF8F00), fontSize: 12, fontWeight: FontWeight.bold)),
@@ -6920,7 +6959,7 @@ class _RatingScreenState extends State<RatingScreen> {
                                           .withOpacity(0.4)),
                                   borderRadius: BorderRadius.circular(20),
                                   color: const Color(0xFFFF8F00)
-                                      .withOpacity(0.08),
+                                          .withOpacity(0.08),
                                 ),
                                 child: Text(tag,
                                     style: const TextStyle(
