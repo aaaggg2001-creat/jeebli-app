@@ -31,6 +31,16 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: 🔑 Print SHA Fingerprints (for Firebase Console)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew signingReport 2>&1 | grep -A 10 "Variant: release" || ./gradlew signingReport 2>&1 | grep -A 6 "SHA"
+          echo "======================================"
+          echo "📋 All SHA fingerprints:"
+          ./gradlew signingReport 2>&1 | grep "SHA"
+          echo "======================================"
+
       - name: Build APK
         run: flutter build apk --release
 
