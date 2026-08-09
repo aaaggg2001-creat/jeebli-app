@@ -19,7 +19,6 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'super_admin_screen.dart';
-import 'phone_auth_screen.dart';
 
 // ─── OneSignal Config ──────────────────────────────────────────────────────
 const String _kOneSignalAppId = '43a24efe-0d39-453f-8b14-1c3a6282c230';
@@ -88,6 +87,32 @@ Future<bool> sendOneSignalBroadcast({
   } catch (e) {
     debugPrint('❌ OneSignal Broadcast error: $e');
     return false;
+  }
+}
+
+/// ─── فتح تطبيق الخرائط المباشر (Belli / Uber / Google Maps) ───────────────
+Future<void> openNativeMap({
+  double? destLat,
+  double? destLng,
+  double? originLat,
+  double? originLng,
+}) async {
+  if (destLat == null || destLng == null) return;
+  final String googleMapsUrl = originLat != null && originLng != null
+      ? 'https://www.google.com/maps/dir/?api=1&origin=$originLat,$originLng&destination=$destLat,$destLng&travelmode=driving'
+      : 'https://www.google.com/maps/search/?api=1&query=$destLat,$destLng';
+
+  final Uri uri = Uri.parse(googleMapsUrl);
+  try {
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+  } catch (_) {}
+
+  final Uri geoUri = Uri.parse('geo:$destLat,$destLng?q=$destLat,$destLng');
+  if (await canLaunchUrl(geoUri)) {
+    await launchUrl(geoUri, mode: LaunchMode.externalApplication);
   }
 }
 
@@ -9847,120 +9872,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     );
   }
 
-  Widget _buildOrderHistorySection(
-      BuildContext context, JeebliController controller) {
-    if (controller.pastOrders.isEmpty) {
-      return const SizedBox.shrink();
-    }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-          child: Text('سجل الطلبات وإعادة الطلب السريع 📜',
-              style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white)),
-        ),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: controller.pastOrders.length,
-          itemBuilder: (ctx, i) {
-            final order = controller.pastOrders[i];
-            final itemsSummary = order.items
-                .map((item) => '${item.quantity}× ${item.product.name}')
-                .join(', ');
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.05)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(order.restaurantName,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13.5,
-                              color: Colors.amber)),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(8)),
-                        child: Text(order.id,
-                            style: const TextStyle(
-                                fontSize: 10.5, color: Colors.white54)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(Icons.access_time_rounded, color: Colors.white54, size: 12),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${order.date.day}/${order.date.month}/${order.date.year} - ${order.date.hour}:${order.date.minute.toString().padLeft(2, '0')}',
-                        style: const TextStyle(fontSize: 10.5, color: Colors.white54),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(itemsSummary,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 11.5, color: Colors.white70, height: 1.3)),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Divider(height: 1, color: Colors.white12),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('${order.totalAmount.toStringAsFixed(0)} د.ع',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: Color(0xFFFF8F00))),
-                      ElevatedButton.icon(
-                        onPressed: () => controller.reorder(order, context),
-                        icon: const Icon(Icons.autorenew_rounded, size: 14),
-                        label: const Text('إعادة الطلب 🔄',
-                            style: TextStyle(
-                                fontSize: 11, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF8F00),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
 
   void _showPickAvatarModal(BuildContext context, JeebliController controller) {
     final urlC = TextEditingController(text: controller.customerAvatarUrl);
