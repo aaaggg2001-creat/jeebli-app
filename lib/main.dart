@@ -121,8 +121,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('📩 إشعار في الخلفية: ${message.notification?.title}');
 
-  final title = message.notification?.title ?? 'جيبلي 🛵';
-  final body = message.notification?.body ?? '';
+  final title =
+      message.notification?.title ?? message.data['title'] ?? 'جيبلي 🛵';
+  final body =
+      message.notification?.body ?? message.data['body'] ?? '';
+  if (title.isEmpty && body.isEmpty) return;
 
   final FlutterLocalNotificationsPlugin localNotifications =
       FlutterLocalNotificationsPlugin();
@@ -130,7 +133,24 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   const initSettings = InitializationSettings(android: androidInit);
   await localNotifications.initialize(settings: initSettings);
 
-  const androidDetails = AndroidNotificationDetails(
+  // إنشاء القناة أولاً بأعلى أولوية
+  const channel = AndroidNotificationChannel(
+    'jeebli_orders_channel',
+    'إشعارات الطلبات',
+    description: 'إشعارات حالة الطلبات والعروض من جيبلي',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+    showBadge: true,
+    enableLights: true,
+    ledColor: Color(0xFFFF8F00),
+  );
+  await localNotifications
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  final androidDetails = AndroidNotificationDetails(
     'jeebli_orders_channel',
     'إشعارات الطلبات',
     channelDescription: 'إشعارات حالة الطلبات والعروض من جيبلي',
@@ -139,9 +159,23 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     icon: '@mipmap/ic_launcher',
     playSound: true,
     enableVibration: true,
-    styleInformation: BigTextStyleInformation(''),
+    autoCancel: false, // يبقى في البردة حتى يمسحه المستخدم
+    ongoing: false,
+    color: const Color(0xFFFF8F00),
+    ledColor: const Color(0xFFFF8F00),
+    ledOnMs: 1000,
+    ledOffMs: 500,
+    enableLights: true,
+    fullScreenIntent: true, // ينبه حتى لو الشاشة مغلقة
+    styleInformation: BigTextStyleInformation(
+      body,
+      htmlFormatBigText: false,
+      contentTitle: title,
+      htmlFormatContentTitle: false,
+    ),
+    ticker: title,
   );
-  const details = NotificationDetails(android: androidDetails);
+  final details = NotificationDetails(android: androidDetails);
 
   await localNotifications.show(
     id: message.messageId.hashCode,
@@ -162,7 +196,7 @@ class JeebliNotificationService {
       FlutterLocalNotificationsPlugin();
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
 
-  /// قناة الإشعارات لأندرويد
+  /// قناة الإشعارات لأندرويد - أعلى أولوية مع صوت ووميض
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'jeebli_orders_channel',
     'إشعارات الطلبات',
@@ -170,6 +204,9 @@ class JeebliNotificationService {
     importance: Importance.max,
     playSound: true,
     enableVibration: true,
+    showBadge: true,
+    enableLights: true,
+    ledColor: Color(0xFFFF8F00),
   );
 
   Future<void> initialize() async {
@@ -201,16 +238,26 @@ class JeebliNotificationService {
 
     // ── الاستماع للرسائل أثناء عمل التطبيق (Foreground) ─────────
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      final notification = message.notification;
-      final android = message.notification?.android;
-      if (notification != null && android != null) {
+      final title = message.notification?.title ??
+          message.data['title'] ??
+          'جيبلي 🛵';
+      final body =
+          message.notification?.body ?? message.data['body'] ?? '';
+      if (title.isNotEmpty || body.isNotEmpty) {
         _showLocalNotification(
-          title: notification.title ?? 'جيبلي 🛵',
-          body: notification.body ?? '',
+          title: title,
+          body: body,
           payload: message.data['route'] ?? '',
         );
       }
     });
+
+    // ── تعيين صلاحية عرض الإشعارات في المقدمة (iOS مستقبلاً) ─────
+    await _fcm.setForegroundNotificationPresentationOptions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
 
     // ── الاستماع عند النقر على الإشعار وفتح التطبيق (Background) ─
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
@@ -250,14 +297,14 @@ class JeebliNotificationService {
     }
   }
 
-  /// إرسال إشعار محلي يظهر فوراً
+  /// إرسال إشعار محلي يظهر فوراً مع صوت ووميض وبقاء في البردة
   Future<void> _showLocalNotification({
     required String title,
     required String body,
     String payload = '',
     int id = 0,
   }) async {
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       'jeebli_orders_channel',
       'إشعارات الطلبات',
       channelDescription: 'إشعارات حالة الطلبات والعروض من جيبلي',
@@ -266,9 +313,23 @@ class JeebliNotificationService {
       icon: '@mipmap/ic_launcher',
       playSound: true,
       enableVibration: true,
-      styleInformation: BigTextStyleInformation(''),
+      autoCancel: false, // يبقى في البردة حتى يمسحه المستخدم يدوياً ✅
+      ongoing: false,
+      color: const Color(0xFFFF8F00),
+      ledColor: const Color(0xFFFF8F00),
+      ledOnMs: 1000,
+      ledOffMs: 500,
+      enableLights: true,
+      fullScreenIntent: true, // يوقظ الشاشة إن كانت مغلقة ✅
+      ticker: title,
+      styleInformation: BigTextStyleInformation(
+        body,
+        htmlFormatBigText: false,
+        contentTitle: title,
+        htmlFormatContentTitle: false,
+      ),
     );
-    const details = NotificationDetails(android: androidDetails);
+    final details = NotificationDetails(android: androidDetails);
     await _localNotifications.show(
       id: id,
       title: title,
@@ -1412,8 +1473,78 @@ class JeebliController extends ChangeNotifier {
         body: body,
         data: {'orderId': orderId, 'screen': 'track'},
       );
+      // حفظ الإشعار في سجل الإشعارات الدائم للزبون
+      if (custDeviceUid.isNotEmpty) {
+        FirebaseFirestore.instance
+            .collection('notification_history')
+            .doc(custDeviceUid)
+            .collection('items')
+            .add({
+              'title': title,
+              'body': body,
+              'type': 'order',
+              'isRead': false,
+              'createdAt': FieldValue.serverTimestamp(),
+            })
+            .then((_) {})
+            .catchError((_) {});
+      }
     } catch (e) {
       debugPrint('Notify customer error: $e');
+    }
+  }
+
+  /// ═══ إرسال إشعار لجميع المندوبين المسجلين في مطعم معين ═══
+  Future<void> _notifyAllDrivers({
+    required String restaurantId,
+    required String title,
+    required String body,
+    required String orderId,
+  }) async {
+    try {
+      // جلب جميع المندوبين الخاصين بهذا المطعم
+      final driversSnap = await FirebaseFirestore.instance
+          .collection('admin_credentials')
+          .where('role', isEqualTo: 'driver')
+          .where('restaurantId', isEqualTo: restaurantId)
+          .get();
+
+      for (final driverDoc in driversSnap.docs) {
+        final driverDeviceUid =
+            driverDoc.data()['deviceUid']?.toString() ?? '';
+        if (driverDeviceUid.isEmpty) continue;
+
+        final playerDoc = await FirebaseFirestore.instance
+            .collection('onesignal_players')
+            .doc(driverDeviceUid)
+            .get();
+        final playerId = playerDoc.data()?['playerId'] ?? '';
+        if (playerId.isEmpty) continue;
+
+        await sendOneSignalPush(
+          playerId: playerId,
+          title: title,
+          body: body,
+          data: {'orderId': orderId, 'screen': 'driver_dashboard'},
+        );
+        // حفظ إشعار المندوب في سجله الدائم
+        FirebaseFirestore.instance
+            .collection('notification_history')
+            .doc(driverDeviceUid)
+            .collection('items')
+            .add({
+              'title': title,
+              'body': body,
+              'type': 'driver_order',
+              'isRead': false,
+              'createdAt': FieldValue.serverTimestamp(),
+            })
+            .then((_) {})
+            .catchError((_) {});
+      }
+      debugPrint('✅ Notified all drivers for restaurant: $restaurantId');
+    } catch (e) {
+      debugPrint('Notify all drivers error: $e');
     }
   }
 
@@ -10551,35 +10682,23 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                     orderId: docRef.id,
                                                   );
                                                 }
-                                                // 🔔 إشعار للمندوب عبر OneSignal (إذا كان مسجل دخوله مسبقاً)
-                                                final driverDoc =
-                                                    await FirebaseFirestore
-                                                        .instance
-                                                        .collection(
-                                                          'admin_credentials',
-                                                        )
-                                                        .doc(dPhone)
-                                                        .get();
-                                                final driverDeviceUid =
-                                                    driverDoc
-                                                        .data()?['deviceUid']
-                                                        ?.toString() ??
-                                                    '';
-                                                if (driverDeviceUid
-                                                        .isNotEmpty &&
-                                                    context.mounted) {
+                                                // 🔔 إشعار لجميع مندوبي المطعم عبر OneSignal
+                                                if (context.mounted) {
                                                   JeebliProvider.of(
                                                     context,
-                                                  )._notifyCustomer(
-                                                    custDeviceUid:
-                                                        driverDeviceUid,
+                                                  )._notifyAllDrivers(
+                                                    restaurantId:
+                                                        controller
+                                                            .userRestaurantId ??
+                                                        '',
                                                     title:
                                                         '🛵 طلب جديد بانتظارك!',
                                                     body:
-                                                        'تم تكليفك بتوصيل طلب جديد للمطعم، افتح التطبيق للتفاصيل.',
+                                                        'تم تعيينك لتوصيل طلب جديد. افتح التطبيق للتفاصيل.',
                                                     orderId: docRef.id,
                                                   );
                                                 }
+
 
                                                 if (ctx.mounted) {
                                                   Navigator.pop(ctx);

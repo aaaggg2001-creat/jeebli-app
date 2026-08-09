@@ -1224,6 +1224,20 @@ class _NotificationsTabState extends State<_NotificationsTab> {
                     }
                     setState(() => _isSending = true);
                     final success = await sendOneSignalBroadcast(title: title, body: body);
+                    // حفظ الإشعار في Firestore ليظهر في نافذة إشعارات كل زبون
+                    if (success) {
+                      try {
+                        await FirebaseFirestore.instance
+                            .collection('broadcast_notifications')
+                            .add({
+                          'title': title,
+                          'body': body,
+                          'type': 'promo',
+                          'isRead': false,
+                          'createdAt': FieldValue.serverTimestamp(),
+                        });
+                      } catch (_) {}
+                    }
                     setState(() => _isSending = false);
                     if (context.mounted) {
                       if (success) {
