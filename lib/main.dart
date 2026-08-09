@@ -5693,14 +5693,6 @@ class CartScreen extends StatelessWidget {
             height: 50,
             child: ElevatedButton(
               onPressed: () {
-                if (!controller.isLoggedIn) {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomerPhoneLoginScreen()));
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('يرجى تسجيل الدخول برقم الهاتف أولاً لإتمام طلبك'),
-                    backgroundColor: Colors.orange,
-                  ));
-                  return;
-                }
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -10013,10 +10005,10 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  // للزبائن: _idController = الاسم، _phoneController = رقم الهاتف
-  // لأصحاب المطاعم: _idController = رقم الهاتف، _phoneController = الباسورد
   final _idController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _guestNameController = TextEditingController();
+  final _guestPhoneController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
   String _selectedRole = 'customer';
@@ -10025,6 +10017,8 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _idController.dispose();
     _phoneController.dispose();
+    _guestNameController.dispose();
+    _guestPhoneController.dispose();
     super.dispose();
   }
 
@@ -10194,44 +10188,77 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ] else ...[
-                      // ---- واجهة الزبائن (تسجيل الدخول برقم الهاتف SMS OTP) ----
-                      const Icon(Icons.phonelink_lock_rounded, size: 64, color: Colors.amber),
+                      // ---- واجهة الزبائن (إدخال الاسم والهاتف مباشرة) ----
+                      const Icon(Icons.person_rounded, size: 64, color: Color(0xFFFF8F00)),
                       const SizedBox(height: 16),
                       const Text(
-                        'تسجيل الدخول السريع',
+                        'أدخل معلوماتك',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'لا حاجة لكلمات المرور بعد الآن! سجل دخولك برقم هاتفك عبر رسالة SMS لضمان حفظ حسابك وطلباتك للأبد.',
+                        'أدخل اسمك ورقم هاتفك لكي يتمكن المندوب من التواصل معك عند توصيل طلبك.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.5),
                       ),
-                      const SizedBox(height: 36),
-                      
-                      // زر الدخول للزبائن
-                      Container(
-                        width: double.infinity,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          gradient: const LinearGradient(colors: [Color(0xFFFF8F00), Color(0xFFE65100)]),
-                          boxShadow: [
-                            BoxShadow(color: const Color(0xFFE65100).withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 8))
-                          ],
+                      const SizedBox(height: 24),
+                      // حقل الاسم
+                      TextField(
+                        controller: _guestNameController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'الاسم الكريم',
+                          labelStyle: const TextStyle(color: Colors.white54),
+                          prefixIcon: const Icon(Icons.person_outline_rounded, color: Color(0xFFFF8F00)),
+                          filled: true,
+                          fillColor: const Color(0xFF1E293B),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                         ),
+                      ),
+                      const SizedBox(height: 12),
+                      // حقل الهاتف
+                      TextField(
+                        controller: _guestPhoneController,
+                        keyboardType: TextInputType.phone,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'رقم الهاتف',
+                          labelStyle: const TextStyle(color: Colors.white54),
+                          prefixIcon: const Icon(Icons.phone_rounded, color: Color(0xFFFF8F00)),
+                          filled: true,
+                          fillColor: const Color(0xFF1E293B),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (ctx) => const CustomerPhoneLoginScreen()));
+                            final name = _guestNameController.text.trim();
+                            final phone = _guestPhoneController.text.trim();
+                            if (name.isEmpty || phone.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('يرجى إدخال الاسم ورقم الهاتف'), backgroundColor: Colors.orange),
+                              );
+                              return;
+                            }
+                            final c = JeebliProvider.of(context);
+                            c.updateCustomerName(name);
+                            c.customerPhone = phone;
+                            c.login(name, phone, 'customer');
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('✅ تم حفظ معلوماتك بنجاح!'), backgroundColor: Colors.green),
+                            );
                           },
-                          icon: const Icon(Icons.sms_rounded, color: Colors.white),
+                          icon: const Icon(Icons.save_rounded, color: Colors.white),
+                          label: const Text('حفظ المعلومات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.transparent,
-                            shadowColor: Colors.transparent,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            backgroundColor: const Color(0xFFFF8F00),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
-                          label: const Text('دخول عبر رقم الهاتف (SMS)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
                         ),
                       ),
                     ],
