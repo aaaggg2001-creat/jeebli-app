@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "909720329789",
+    "project_id": "jeebli-app",
+    "storage_bucket": "jeebli-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:909720329789:android:7de9318d9d483c0f53d454",
+        "android_client_info": {
+          "package_name": "com.example.jeebli_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAwR5V8r18auiPf5bPyeIE-FrnEslkKCns"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
