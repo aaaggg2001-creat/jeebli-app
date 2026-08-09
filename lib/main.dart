@@ -3674,8 +3674,11 @@ class CustomerNotificationsScreen extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final doc = firestoreDocs[index];
                       final data = doc.data() as Map<String, dynamic>;
-                      final message = data['message'] as String? ?? '';
-                      final isWarning = data['isWarning'] as bool? ?? false;
+                      final title = data['title'] as String? ?? '';
+                      final body = data['body'] as String? ?? '';
+                      final message = title.isNotEmpty ? '$title\n$body' : body;
+                      final type = data['type'] as String? ?? 'order';
+                      final isWarning = type == 'warning';
                       final ts = data['createdAt'] as Timestamp?;
                       final time = ts?.toDate() ?? DateTime.now();
                       return Dismissible(
@@ -11955,10 +11958,6 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            const SizedBox(height: 12),
-            Stack(
-              alignment: Alignment.bottomRight,
-              children: [
                 Container(
                   width: 96,
                   height: 96,
@@ -11977,51 +11976,17 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                       ),
                     ],
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(48),
-                    child: controller.customerAvatarUrl.isNotEmpty
-                        ? CustomAppImage(
-                            imageUrl: controller.customerAvatarUrl,
-                            width: 96,
-                            height: 96,
-                            fit: BoxFit.cover,
-                          )
-                        : Center(
-                            child: Text(
-                              name.isNotEmpty ? name[0] : '؟',
-                              style: const TextStyle(
-                                fontSize: 38,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () => _showPickAvatarModal(context, controller),
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.camera_alt_rounded,
-                      size: 14,
-                      color: Color(0xFFFF8F00),
+                  child: Center(
+                    child: Text(
+                      name.isNotEmpty ? name[0] : '؟',
+                      style: const TextStyle(
+                        fontSize: 38,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
-              ],
-            ),
             const SizedBox(height: 12),
             Text(
               name,
