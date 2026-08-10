@@ -736,10 +736,10 @@ enum PaymentMethod { cod, mastercard }
 extension ColorExtension on BuildContext {
   Color get dynamicWhite => Theme.of(this).brightness == Brightness.dark
       ? Colors.white
-      : const Color(0xFF0F172A);
+      : Colors.black;
   Color get dynamicWhite70 => Theme.of(this).brightness == Brightness.dark
       ? Colors.white70
-      : const Color(0xFF475569);
+      : Colors.black87;
 }
 
 class JeebliController extends ChangeNotifier {
@@ -2729,16 +2729,32 @@ class MyApp extends StatelessWidget {
       notifier: JeebliController(),
       child: Builder(
         builder: (context) {
+          final controller = JeebliProvider.of(context);
           return MaterialApp(
             title: 'جيب لي ديلفري',
             debugShowCheckedModeBanner: false,
+            themeMode: controller.isDarkMode ? ThemeMode.dark : ThemeMode.light,
             theme: ThemeData(
               useMaterial3: true,
+              brightness: Brightness.light,
               colorScheme: ColorScheme.fromSeed(
+                brightness: Brightness.light,
                 seedColor: const Color(0xFFE65100),
                 primary: const Color(0xFFE65100),
                 secondary: const Color(0xFFFFB300),
-                surface: const Color(0xFFFFFDF9),
+                surface: const Color(0xFFF1F5F9),
+              ),
+              fontFamily: 'Cairo',
+            ),
+            darkTheme: ThemeData(
+              useMaterial3: true,
+              brightness: Brightness.dark,
+              colorScheme: ColorScheme.fromSeed(
+                brightness: Brightness.dark,
+                seedColor: const Color(0xFFE65100),
+                primary: const Color(0xFFE65100),
+                secondary: const Color(0xFFFFB300),
+                surface: const Color(0xFF0F172A),
               ),
               fontFamily: 'Cairo',
             ),
@@ -3553,7 +3569,8 @@ class CustomerNotificationsScreen extends StatelessWidget {
                       final data = doc.data() as Map<String, dynamic>;
                       final title = data['title'] as String? ?? '';
                       final body = data['body'] as String? ?? '';
-                      final message = title.isNotEmpty ? '$title\n$body' : body;
+                      final messageStr = data['message'] as String? ?? '';
+                      final message = messageStr.isNotEmpty ? messageStr : (title.isNotEmpty ? '$title\n$body' : body);
                       final type = data['type'] as String? ?? 'order';
                       final isWarning = type == 'warning';
                       final ts = data['createdAt'] as Timestamp?;
