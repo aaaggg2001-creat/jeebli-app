@@ -9,7 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -115,75 +115,7 @@ Future<void> openNativeMap({
   } catch (_) {}
 }
 
-/// ─── FCM Background Handler (يجب أن يكون Top-level function) ───────────────
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  debugPrint('📩 إشعار في الخلفية: ${message.notification?.title}');
 
-  final title =
-      message.notification?.title ?? message.data['title'] ?? 'جيبلي 🛵';
-  final body =
-      message.notification?.body ?? message.data['body'] ?? '';
-  if (title.isEmpty && body.isEmpty) return;
-
-  final FlutterLocalNotificationsPlugin localNotifications =
-      FlutterLocalNotificationsPlugin();
-  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const initSettings = InitializationSettings(android: androidInit);
-  await localNotifications.initialize(settings: initSettings);
-
-  // إنشاء القناة أولاً بأعلى أولوية
-  const channel = AndroidNotificationChannel(
-    'jeebli_orders_channel',
-    'إشعارات الطلبات',
-    description: 'إشعارات حالة الطلبات والعروض من جيبلي',
-    importance: Importance.max,
-    playSound: true,
-    enableVibration: true,
-    showBadge: true,
-    enableLights: true,
-    ledColor: Color(0xFFFF8F00),
-  );
-  await localNotifications
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
-
-  final androidDetails = AndroidNotificationDetails(
-    'jeebli_orders_channel',
-    'إشعارات الطلبات',
-    channelDescription: 'إشعارات حالة الطلبات والعروض من جيبلي',
-    importance: Importance.max,
-    priority: Priority.high,
-    icon: '@mipmap/ic_launcher',
-    playSound: true,
-    enableVibration: true,
-    autoCancel: false, // يبقى في البردة حتى يمسحه المستخدم
-    ongoing: false,
-    color: const Color(0xFFFF8F00),
-    ledColor: const Color(0xFFFF8F00),
-    ledOnMs: 1000,
-    ledOffMs: 500,
-    enableLights: true,
-    fullScreenIntent: true, // ينبه حتى لو الشاشة مغلقة
-    styleInformation: BigTextStyleInformation(
-      body,
-      htmlFormatBigText: false,
-      contentTitle: title,
-      htmlFormatContentTitle: false,
-    ),
-    ticker: title,
-  );
-  final details = NotificationDetails(android: androidDetails);
-
-  await localNotifications.show(
-    id: message.messageId.hashCode,
-    title: title,
-    body: body,
-    notificationDetails: details,
-  );
-}
 
 /// ─── خدمة الإشعارات المحلية والسحابية ──────────────────────────────────────
 class JeebliNotificationService {
@@ -194,7 +126,6 @@ class JeebliNotificationService {
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
-  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
 
   /// قناة الإشعارات لأندرويد - أعلى أولوية مع صوت ووميض
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
@@ -210,14 +141,7 @@ class JeebliNotificationService {
   );
 
   Future<void> initialize() async {
-    // ── طلب إذن الإشعارات ─────────────────────────────────────────
-    final settings = await _fcm.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
-    debugPrint('🔔 صلاحية الإشعارات: ${settings.authorizationStatus}');
+
 
     // ── تهيئة الإشعارات المحلية ───────────────────────────────────
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -236,66 +160,10 @@ class JeebliNotificationService {
         >()
         ?.createNotificationChannel(_channel);
 
-    // ── الاستماع للرسائل أثناء عمل التطبيق (Foreground) ─────────
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      final title = message.notification?.title ??
-          message.data['title'] ??
-          'جيبلي 🛵';
-      final body =
-          message.notification?.body ?? message.data['body'] ?? '';
-      if (title.isNotEmpty || body.isNotEmpty) {
-        _showLocalNotification(
-          title: title,
-          body: body,
-          payload: message.data['route'] ?? '',
-        );
-      }
-    });
 
-    // ── تعيين صلاحية عرض الإشعارات في المقدمة (iOS مستقبلاً) ─────
-    await _fcm.setForegroundNotificationPresentationOptions(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-
-    // ── الاستماع عند النقر على الإشعار وفتح التطبيق (Background) ─
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      debugPrint('🔗 تم فتح الإشعار: ${message.data}');
-    });
-
-    // ── طباعة التوكن للاختبار ─────────────────────────────────────
-    try {
-      final token = await _fcm.getToken();
-      debugPrint('📱 FCM Token: $token');
-    } catch (e) {
-      debugPrint('FCM Token error: $e');
-    }
-
-    // ── تحديث التوكن عند تجديده ─────────────────────────────────
-    _fcm.onTokenRefresh.listen((newToken) {
-      debugPrint('🔄 FCM Token refreshed: $newToken');
-    });
   }
 
   /// حفظ FCM Token في Firestore لإرسال الإشعارات عند إغلاق التطبيق
-  Future<void> saveFcmTokenToFirestore(String deviceUid) async {
-    try {
-      final token = await _fcm.getToken();
-      if (token == null || token.isEmpty) return;
-      await FirebaseFirestore.instance
-          .collection('fcm_tokens')
-          .doc(deviceUid)
-          .set({
-            'token': token,
-            'platform': 'android',
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-      debugPrint('✅ FCM Token saved to Firestore for device: $deviceUid');
-    } catch (e) {
-      debugPrint('FCM Token save error: $e');
-    }
-  }
 
   /// إرسال إشعار محلي يظهر فوراً مع صوت ووميض وبقاء في البردة
   Future<void> _showLocalNotification({
@@ -356,7 +224,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // ── تسجيل Background handler قبل أي شيء ──────────────────────
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
 
   try {
     await Firebase.initializeApp(
@@ -402,7 +270,7 @@ class JeebliBackButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: Material(
-        color: backgroundColor ?? Colors.white.withOpacity(0.12),
+        color: backgroundColor ?? context.dynamicWhite.withOpacity(0.12),
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -420,7 +288,7 @@ class JeebliBackButton extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withOpacity(0.2),
+                color: context.dynamicWhite.withOpacity(0.2),
                 width: 1.2,
               ),
             ),
@@ -865,6 +733,15 @@ enum OrderStatus { idle, confirmed, preparing, onWay, arrived, rated }
 /// pending → accepted/preparing → onTheWay → delivered → rejected
 enum PaymentMethod { cod, mastercard }
 
+extension ColorExtension on BuildContext {
+  Color get dynamicWhite => Theme.of(this).brightness == Brightness.dark
+      ? Colors.white
+      : const Color(0xFF0F172A);
+  Color get dynamicWhite70 => Theme.of(this).brightness == Brightness.dark
+      ? Colors.white70
+      : const Color(0xFF475569);
+}
+
 class JeebliController extends ChangeNotifier {
   bool _isOffline = false;
   bool get isOffline => _isOffline;
@@ -946,7 +823,7 @@ class JeebliController extends ChangeNotifier {
 
       // ── حفظ FCM Token + OneSignal Player ID في Firestore ────────────────
       if (deviceUid.isNotEmpty) {
-        jeebliNotifications.saveFcmTokenToFirestore(deviceUid);
+//         jeebliNotifications.saveFcmTokenToFirestore(deviceUid);
         // حفظ OneSignal Player ID لإرسال الإشعارات حتى والتطبيق مغلق
         _saveOneSignalPlayerId(deviceUid);
       }
@@ -2294,14 +2171,14 @@ class JeebliController extends ChangeNotifier {
               Text('سلة مختلطة!', style: TextStyle(fontSize: 16)),
             ],
           ),
-          content: const Text(
+          content: Text(
             'سلتك تحتوي وجبات من مطعم آخر.\nهل تريد تفريغ السلة والبدء من هذا المطعم؟',
             style: TextStyle(fontSize: 13.5, height: 1.5),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء'),
+              child: Text('إلغاء'),
             ),
             ElevatedButton(
               onPressed: () {
@@ -2312,9 +2189,9 @@ class JeebliController extends ChangeNotifier {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFE65100),
-                foregroundColor: Colors.white,
+                foregroundColor: context.dynamicWhite,
               ),
-              child: const Text('نعم، ابدأ من جديد'),
+              child: Text('نعم، ابدأ من جديد'),
             ),
           ],
         ),
@@ -2902,26 +2779,26 @@ class MyApp extends StatelessWidget {
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.wifi_off_rounded,
                                       color: Colors.redAccent,
                                       size: 64,
                                     ),
                                     const SizedBox(height: 16),
-                                    const Text(
+                                    Text(
                                       'لا يوجد اتصال بالإنترنت',
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: context.dynamicWhite,
                                         fontSize: 18,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
-                                    const Text(
+                                    Text(
                                       'لا يمكن الطلب بسبب عدم الاتصال بالإنترنت.\nيرجى التحقق من اتصالك والمحاولة مجدداً.',
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: context.dynamicWhite70,
                                         fontSize: 13,
                                         height: 1.5,
                                       ),
@@ -3066,27 +2943,27 @@ class _SplashScreenState extends State<SplashScreen>
                       colors: [Color(0xFFFF8F00), Color(0xFFFF6B00)],
                     ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.location_on_rounded,
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                     size: 36,
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   'تفعيل خدمة الموقع',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   'هل تريد تفعيل الموقع لرؤية أقرب المطاعم إليك؟\nيمكنك تفعيله لاحقاً من صفحتك الشخصية.',
                   style: TextStyle(
-                    color: Colors.white60,
+                    color: context.dynamicWhite70,
                     fontSize: 13,
                     height: 1.6,
                   ),
@@ -3098,7 +2975,7 @@ class _SplashScreenState extends State<SplashScreen>
                     Expanded(
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white54,
+                          foregroundColor: context.dynamicWhite70,
                           side: const BorderSide(color: Colors.white24),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -3106,7 +2983,7 @@ class _SplashScreenState extends State<SplashScreen>
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
                         onPressed: () => Navigator.pop(ctx),
-                        child: const Text('لاحقاً'),
+                        child: Text('لاحقاً'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -3114,7 +2991,7 @@ class _SplashScreenState extends State<SplashScreen>
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFFF8F00),
-                          foregroundColor: Colors.white,
+                          foregroundColor: context.dynamicWhite,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -3124,7 +3001,7 @@ class _SplashScreenState extends State<SplashScreen>
                           Navigator.pop(ctx);
                           await controller.detectLocation();
                         },
-                        child: const Text(
+                        child: Text(
                           'تفعيل',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
@@ -3244,12 +3121,12 @@ class _SplashScreenState extends State<SplashScreen>
                       shaderCallback: (bounds) => const LinearGradient(
                         colors: [Color(0xFFFF8F00), Color(0xFFFFD54F)],
                       ).createShader(bounds),
-                      child: const Text(
+                      child: Text(
                         'جيب لي',
                         style: TextStyle(
                           fontSize: 48,
                           fontWeight: FontWeight.w900,
-                          color: Colors.white,
+                          color: context.dynamicWhite,
                           letterSpacing: 2,
                           height: 1,
                         ),
@@ -3263,11 +3140,11 @@ class _SplashScreenState extends State<SplashScreen>
                     position: _taglineSlide,
                     child: FadeTransition(
                       opacity: _taglineFade,
-                      child: const Text(
+                      child: Text(
                         'وجبتك عالبيت بضغطة زر ✨',
                         style: TextStyle(
                           fontSize: 15,
-                          color: Colors.white60,
+                          color: context.dynamicWhite70,
                           fontWeight: FontWeight.w500,
                           letterSpacing: 0.5,
                         ),
@@ -3279,7 +3156,7 @@ class _SplashScreenState extends State<SplashScreen>
                     position: _taglineSlide,
                     child: FadeTransition(
                       opacity: _taglineFade,
-                      child: const Text(
+                      child: Text(
                         'أسرع توصيل • أشهى الوجبات 🛵',
                         style: TextStyle(
                           fontSize: 12,
@@ -3312,7 +3189,7 @@ class _SplashScreenState extends State<SplashScreen>
                             child: LinearProgressIndicator(
                               value: _progressController.value,
                               minHeight: 4,
-                              backgroundColor: Colors.white.withOpacity(0.08),
+                              backgroundColor: context.dynamicWhite.withOpacity(0.08),
                               valueColor: const AlwaysStoppedAnimation(
                                 Color(0xFFFF8F00),
                               ),
@@ -3325,9 +3202,9 @@ class _SplashScreenState extends State<SplashScreen>
                                 : _progressController.value < 0.9
                                 ? 'تجهيز قائمة الوجبات...'
                                 : 'أهلاً وسهلاً! 🎉',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: Colors.white38,
+                              color: context.dynamicWhite70,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -3380,9 +3257,9 @@ class AppRouteNavigator extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.fastfood_rounded,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                   size: 42,
                 ),
               ),
@@ -3396,9 +3273,9 @@ class AppRouteNavigator extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 14),
-              const Text(
+              Text(
                 'جاري تحميل بياناتك...',
-                style: TextStyle(color: Colors.white54, fontSize: 13),
+                style: TextStyle(color: context.dynamicWhite70, fontSize: 13),
               ),
             ],
           ),
@@ -3489,7 +3366,7 @@ class MainNavigationShell extends StatelessWidget {
                 Icons.restaurant_menu_outlined,
                 color: controller.subtextColor,
               ),
-              selectedIcon: const Icon(
+              selectedIcon: Icon(
                 Icons.restaurant_menu,
                 color: Color(0xFFFF8F00),
               ),
@@ -3515,8 +3392,8 @@ class MainNavigationShell extends StatelessWidget {
                         ),
                         child: Text(
                           '${controller.cartCount}',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: context.dynamicWhite,
                             fontSize: 9,
                             fontWeight: FontWeight.bold,
                           ),
@@ -3525,7 +3402,7 @@ class MainNavigationShell extends StatelessWidget {
                     ),
                 ],
               ),
-              selectedIcon: const Icon(
+              selectedIcon: Icon(
                 Icons.shopping_cart,
                 color: Color(0xFFFF8F00),
               ),
@@ -3551,8 +3428,8 @@ class MainNavigationShell extends StatelessWidget {
                         ),
                         child: Text(
                           '${controller.unreadNotifications}',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: context.dynamicWhite,
                             fontSize: 9,
                             fontWeight: FontWeight.bold,
                           ),
@@ -3561,7 +3438,7 @@ class MainNavigationShell extends StatelessWidget {
                     ),
                 ],
               ),
-              selectedIcon: const Icon(
+              selectedIcon: Icon(
                 Icons.notifications,
                 color: Color(0xFFFF8F00),
               ),
@@ -3569,7 +3446,7 @@ class MainNavigationShell extends StatelessWidget {
             ),
             NavigationDestination(
               icon: Icon(Icons.person_outline, color: controller.subtextColor),
-              selectedIcon: const Icon(Icons.person, color: Color(0xFFFF8F00)),
+              selectedIcon: Icon(Icons.person, color: Color(0xFFFF8F00)),
               label: 'الحساب',
             ),
           ],
@@ -3632,7 +3509,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
                 await _clearAllFirestoreNotifications(deviceUid);
               }
             },
-            child: const Text(
+            child: Text(
               'مسح الكل',
               style: TextStyle(color: Colors.redAccent, fontSize: 12),
             ),
@@ -3691,7 +3568,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
                             color: Colors.redAccent.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(14),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.delete_outline_rounded,
                             color: Colors.redAccent,
                           ),
@@ -3825,10 +3702,10 @@ class CustomerNotificationsScreen extends StatelessWidget {
           ),
           if (docRef != null)
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.delete_outline_rounded,
                 size: 18,
-                color: Colors.white38,
+                color: Colors.white70,
               ),
               onPressed: () => docRef.delete(),
               tooltip: 'حذف الإشعار',
@@ -4053,9 +3930,9 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                 ),
                               ],
                             ),
-                            child: const Icon(
+                            child: Icon(
                               Icons.fastfood_rounded,
-                              color: Colors.white,
+                              color: context.dynamicWhite,
                               size: 28,
                             ),
                           ),
@@ -4096,7 +3973,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                   color: Colors.amber.withOpacity(0.3),
                                 ),
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.vpn_key_rounded,
                                 color: Colors.amber,
                                 size: 20,
@@ -4112,7 +3989,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                             icon: Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
+                                color: context.dynamicWhite.withOpacity(0.08),
                                 shape: BoxShape.circle,
                                 border: Border.all(color: Colors.white12),
                               ),
@@ -4161,7 +4038,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                               color: controller.subtextColor,
                               fontSize: 14,
                             ),
-                            prefixIcon: const Icon(
+                            prefixIcon: Icon(
                               Icons.search_rounded,
                               color: Color(0xFFFF8F00),
                               size: 22,
@@ -4199,15 +4076,15 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                           child: Center(
                             child: Column(
                               children: [
-                                const Text(
+                                Text(
                                   '🔍',
                                   style: TextStyle(fontSize: 48),
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
                                   'لا توجد نتائج لـ "$_searchQuery"',
-                                  style: const TextStyle(
-                                    color: Colors.white54,
+                                  style: TextStyle(
+                                    color: context.dynamicWhite70,
                                     fontSize: 14,
                                   ),
                                 ),
@@ -4277,16 +4154,16 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                               SnackBar(
                                 content: Row(
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.store_mall_directory_outlined,
-                                      color: Colors.white,
+                                      color: context.dynamicWhite,
                                       size: 20,
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: Text(
                                         '${rest.name} مغلق حالياً 🔴\nالطلب غير متاح في هذا الوقت',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 13,
                                           height: 1.4,
                                         ),
@@ -4382,7 +4259,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                               rest.id,
                                             )
                                             ? Colors.redAccent
-                                            : Colors.white,
+                                            : context.dynamicWhite,
                                         size: 16,
                                       ),
                                     ),
@@ -4411,7 +4288,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                         ),
                                         child: Row(
                                           children: [
-                                            const Icon(
+                                            Icon(
                                               Icons.location_on,
                                               color: Color(0xFFFFB300),
                                               size: 14,
@@ -4419,8 +4296,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                             const SizedBox(width: 4),
                                             Text(
                                               rest.location,
-                                              style: const TextStyle(
-                                                color: Colors.white,
+                                              style: TextStyle(
+                                                color: context.dynamicWhite,
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.bold,
                                               ),
@@ -4455,9 +4332,9 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                           ),
                                           child: Row(
                                             children: [
-                                              const Icon(
+                                              Icon(
                                                 Icons.near_me_rounded,
-                                                color: Colors.white,
+                                                color: context.dynamicWhite,
                                                 size: 12,
                                               ),
                                               const SizedBox(width: 4),
@@ -4472,8 +4349,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                                       : '${d.toStringAsFixed(1)} كم';
                                                   return Text(
                                                     'يبعد $str',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
+                                                    style: TextStyle(
+                                                      color: context.dynamicWhite,
                                                       fontSize: 10.5,
                                                       fontWeight:
                                                           FontWeight.bold,
@@ -4528,7 +4405,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                         ),
                                         child: Row(
                                           children: [
-                                            const Icon(
+                                            Icon(
                                               Icons.star_rounded,
                                               color: Colors.amber,
                                               size: 16,
@@ -4536,7 +4413,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                             const SizedBox(width: 4),
                                             Text(
                                               '${rest.rating}',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.bold,
                                                 color: Colors.greenAccent,
@@ -4596,16 +4473,16 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                   const SizedBox(height: 8),
                                   Text(
                                     rest.description,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.white70,
+                                      color: context.dynamicWhite70,
                                       height: 1.5,
                                     ),
                                   ),
                                   const SizedBox(height: 8),
                                   Row(
                                     children: [
-                                      const Icon(
+                                      Icon(
                                         Icons.access_time_rounded,
                                         color: Colors.amber,
                                         size: 14,
@@ -4613,7 +4490,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                       const SizedBox(width: 4),
                                       Text(
                                         'ساعات العمل: ${rest.workingHoursLabel}',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           color: Colors.amber,
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
@@ -4634,7 +4511,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                     children: [
                                       Row(
                                         children: [
-                                          const Icon(
+                                          Icon(
                                             Icons.fastfood_rounded,
                                             size: 16,
                                             color: Color(0xFFFF8F00),
@@ -4642,16 +4519,16 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                           const SizedBox(width: 6),
                                           Text(
                                             rest.cuisine,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 12,
-                                              color: Colors.white,
+                                              color: context.dynamicWhite,
                                             ),
                                           ),
                                         ],
                                       ),
                                       Row(
                                         children: [
-                                          const Icon(
+                                          Icon(
                                             Icons.delivery_dining_rounded,
                                             size: 18,
                                             color: Colors.lightBlueAccent,
@@ -4659,7 +4536,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                           const SizedBox(width: 6),
                                           Text(
                                             rest.deliveryTime,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 12,
                                               color: Colors.lightBlueAccent,
                                               fontWeight: FontWeight.bold,
@@ -4783,13 +4660,13 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                 vertical: 3,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.25),
+                                color: context.dynamicWhite.withOpacity(0.25),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
                                 offer.discountTag,
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: context.dynamicWhite,
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -4798,8 +4675,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                             const SizedBox(height: 6),
                             Text(
                               offer.title,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: context.dynamicWhite,
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -4809,8 +4686,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                             const SizedBox(height: 2),
                             Text(
                               offer.description,
-                              style: const TextStyle(
-                                color: Colors.white70,
+                              style: TextStyle(
+                                color: context.dynamicWhite70,
                                 fontSize: 10.5,
                               ),
                               maxLines: 2,
@@ -4854,9 +4731,9 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
           ),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.check_circle_rounded, color: Colors.white, size: 28),
+            Icon(Icons.check_circle_rounded, color: context.dynamicWhite, size: 28),
             SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -4865,14 +4742,14 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                   Text(
                     '✅ تم إرسال طلبك للمطعم',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
                     ),
                   ),
                   Text(
                     'سيتواصل معك المطعم للتأكيد قريباً',
-                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 11),
                   ),
                 ],
               ),
@@ -4997,8 +4874,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                           ),
                           Text(
                             headerSub,
-                            style: const TextStyle(
-                              color: Colors.white54,
+                            style: TextStyle(
+                              color: context.dynamicWhite70,
                               fontSize: 11,
                             ),
                           ),
@@ -5048,7 +4925,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                         shape: BoxShape.circle,
                                         color: isActive
                                             ? headerColor.withOpacity(0.2)
-                                            : Colors.white.withOpacity(0.05),
+                                            : context.dynamicWhite.withOpacity(0.05),
                                         border: Border.all(
                                           color: isActive
                                               ? headerColor
@@ -5142,7 +5019,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                     0.15,
                                   ),
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.person_pin_circle_rounded,
                                   color: Colors.lightBlueAccent,
                                   size: 24,
@@ -5153,17 +5030,17 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       '🛵 المندوب',
                                       style: TextStyle(
-                                        color: Colors.white54,
+                                        color: context.dynamicWhite70,
                                         fontSize: 10,
                                       ),
                                     ),
                                     Text(
                                       driverName,
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                      style: TextStyle(
+                                        color: context.dynamicWhite,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 14,
                                       ),
@@ -5188,7 +5065,7 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                                       ? 'على بُعد ${distanceMeters.toStringAsFixed(0)} متر منك'
                                                       : 'على بُعد ${(distanceMeters / 1000).toStringAsFixed(1)} كم منك')
                                                 : 'التتبع الحي نشط 🟢',
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: Colors.greenAccent,
                                               fontSize: 10,
                                               fontWeight: FontWeight.w500,
@@ -5255,12 +5132,12 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                     originLng: custLng,
                                   );
                                 },
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.near_me_rounded,
                                   size: 16,
                                   color: Color(0xFFFF8F00),
                                 ),
-                                label: const Text(
+                                label: Text(
                                   '🗺️ تتبع المندوب على الخريطة',
                                   style: TextStyle(
                                     color: Color(0xFFFF8F00),
@@ -5379,9 +5256,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Row(
+            content: Row(
               children: [
-                Icon(Icons.delivery_dining_rounded, color: Colors.white),
+                Icon(Icons.delivery_dining_rounded, color: context.dynamicWhite),
                 SizedBox(width: 10),
                 Expanded(
                   child: Text('🔔 طلب جديد وصل إليك! اضغط هنا للاطلاع عليه'),
@@ -5416,17 +5293,17 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'واجهة المندوب 🛵',
               style: TextStyle(
-                color: Colors.white,
+                color: context.dynamicWhite,
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
               ),
             ),
             Text(
               'مرحباً $driverName',
-              style: const TextStyle(color: Colors.white54, fontSize: 11),
+              style: TextStyle(color: context.dynamicWhite70, fontSize: 11),
             ),
           ],
         ),
@@ -5457,7 +5334,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
           ),
           const SizedBox(width: 8),
           IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Colors.white54),
+            icon: Icon(Icons.logout_rounded, color: context.dynamicWhite70),
             onPressed: () => controller.logout(),
             tooltip: 'تسجيل الخروج',
           ),
@@ -5508,25 +5385,25 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                         color: const Color(0xFFFF8F00).withOpacity(0.3),
                       ),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.delivery_dining_rounded,
                       color: Color(0xFFFF8F00),
                       size: 56,
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
+                  Text(
                     'لا توجد طلبات مسندة إليك الآن',
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: context.dynamicWhite70,
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     'ستظهر هنا الطلبات عند تعيينك من قبل المطعم',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 12),
                   ),
                   const SizedBox(height: 16),
                   Container(
@@ -5688,13 +5565,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                 vertical: 3,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.06),
+                                color: context.dynamicWhite.withOpacity(0.06),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
                                 '⏰ $orderTime',
-                                style: const TextStyle(
-                                  color: Colors.white54,
+                                style: TextStyle(
+                                  color: context.dynamicWhite70,
                                   fontSize: 10,
                                 ),
                               ),
@@ -5702,8 +5579,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           const SizedBox(width: 6),
                           Text(
                             restName,
-                            style: const TextStyle(
-                              color: Colors.white38,
+                            style: TextStyle(
+                              color: context.dynamicWhite70,
                               fontSize: 11,
                             ),
                           ),
@@ -5721,7 +5598,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           // اسم الزبون
                           Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.person_rounded,
                                 color: Color(0xFFFF8F00),
                                 size: 18,
@@ -5730,8 +5607,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                               Expanded(
                                 child: Text(
                                   custName,
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: context.dynamicWhite,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 15,
                                   ),
@@ -5744,16 +5621,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           // رقم الهاتف + زر اتصال
                           Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.phone_rounded,
-                                color: Colors.white38,
+                                color: context.dynamicWhite70,
                                 size: 16,
                               ),
                               const SizedBox(width: 8),
                               Text(
                                 custPhone,
-                                style: const TextStyle(
-                                  color: Colors.white70,
+                                style: TextStyle(
+                                  color: context.dynamicWhite70,
                                   fontSize: 13,
                                 ),
                               ),
@@ -5805,7 +5682,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.04),
+                              color: context.dynamicWhite.withOpacity(0.04),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(color: Colors.white10),
                             ),
@@ -5815,7 +5692,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                 Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.location_on_rounded,
                                       color: Color(0xFFFF8F00),
                                       size: 18,
@@ -5828,8 +5705,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                         children: [
                                           Text(
                                             'المنطقة: $neighborhood',
-                                            style: const TextStyle(
-                                              color: Colors.white70,
+                                            style: TextStyle(
+                                              color: context.dynamicWhite70,
                                               fontSize: 12.5,
                                               fontWeight: FontWeight.bold,
                                             ),
@@ -5838,8 +5715,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                             const SizedBox(height: 2),
                                             Text(
                                               streetDetails,
-                                              style: const TextStyle(
-                                                color: Colors.white54,
+                                              style: TextStyle(
+                                                color: context.dynamicWhite70,
                                                 fontSize: 11.5,
                                               ),
                                             ),
@@ -5861,12 +5738,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                           destLng: custLng,
                                         );
                                       },
-                                      icon: const Icon(
+                                      icon: Icon(
                                         Icons.map_rounded,
                                         size: 16,
                                         color: Color(0xFFFF8F00),
                                       ),
-                                      label: const Text(
+                                      label: Text(
                                         '📍 فتح موقع الزبون على الخريطة',
                                         style: TextStyle(
                                           color: Color(0xFFFF8F00),
@@ -5898,10 +5775,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           const SizedBox(height: 10),
 
                           // ─── قائمة الوجبات ───
-                          const Text(
+                          Text(
                             '📋 تفاصيل الطلب:',
                             style: TextStyle(
-                              color: Colors.white54,
+                              color: context.dynamicWhite70,
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                             ),
@@ -5930,7 +5807,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                     ),
                                     child: Text(
                                       '$iQty',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: Color(0xFFFF8F00),
                                         fontSize: 11,
                                         fontWeight: FontWeight.bold,
@@ -5941,16 +5818,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   Expanded(
                                     child: Text(
                                       iName,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
+                                      style: TextStyle(
+                                        color: context.dynamicWhite70,
                                         fontSize: 12,
                                       ),
                                     ),
                                   ),
                                   Text(
                                     '$iPrice د.ع',
-                                    style: const TextStyle(
-                                      color: Colors.white54,
+                                    style: TextStyle(
+                                      color: context.dynamicWhite70,
                                       fontSize: 11,
                                     ),
                                   ),
@@ -5965,18 +5842,18 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           // ─── المبلغ الإجمالي ───
                           Row(
                             children: [
-                              const Text(
+                              Text(
                                 'رسوم التوصيل:',
                                 style: TextStyle(
-                                  color: Colors.white38,
+                                  color: context.dynamicWhite70,
                                   fontSize: 11,
                                 ),
                               ),
                               const Spacer(),
                               Text(
                                 '$deliveryFee د.ع',
-                                style: const TextStyle(
-                                  color: Colors.white38,
+                                style: TextStyle(
+                                  color: context.dynamicWhite70,
                                   fontSize: 11,
                                 ),
                               ),
@@ -5985,16 +5862,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           const SizedBox(height: 4),
                           Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.payments_rounded,
                                 color: Colors.greenAccent,
                                 size: 18,
                               ),
                               const SizedBox(width: 6),
-                              const Text(
+                              Text(
                                 'المبلغ الكلي المطلوب:',
                                 style: TextStyle(
-                                  color: Colors.white70,
+                                  color: context.dynamicWhite70,
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -6014,7 +5891,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                 ),
                                 child: Text(
                                   '$total د.ع',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: Colors.greenAccent,
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
@@ -6061,11 +5938,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                     );
                                   }
                                 },
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.delivery_dining_rounded,
                                   size: 20,
                                 ),
-                                label: const Text(
+                                label: Text(
                                   '✅ استلمت الطلب - أنا في الطريق!',
                                 ),
                                 style: ElevatedButton.styleFrom(
@@ -6077,7 +5954,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14),
                                   ),
-                                  textStyle: const TextStyle(
+                                  textStyle: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
                                   ),
@@ -6101,7 +5978,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(
+                                  Icon(
                                     Icons.navigation_rounded,
                                     color: Colors.lightBlueAccent,
                                     size: 16,
@@ -6110,7 +5987,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   Expanded(
                                     child: Text(
                                       'اتجه إلى: $neighborhood${streetDetails.isNotEmpty ? " - $streetDetails" : ""}',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: Colors.lightBlueAccent,
                                         fontSize: 11.5,
                                       ),
@@ -6142,11 +6019,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                     );
                                   }
                                 },
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.check_circle_rounded,
                                   size: 20,
                                 ),
-                                label: const Text(
+                                label: Text(
                                   '📍 وصلت وسلمت الطلب للزبون ✅',
                                 ),
                                 style: ElevatedButton.styleFrom(
@@ -6158,7 +6035,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14),
                                   ),
-                                  textStyle: const TextStyle(
+                                  textStyle: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
                                   ),
@@ -6284,10 +6161,10 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
           appBar: AppBar(
             title: Text(
               rest.name,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
-                color: Colors.white,
+                color: context.dynamicWhite,
               ),
             ),
             leading: JeebliBackButton(
@@ -6320,7 +6197,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.location_on,
                                   color: Color(0xFFFF8F00),
                                   size: 13,
@@ -6328,9 +6205,9 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                 const SizedBox(width: 4),
                                 Text(
                                   rest.location,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
-                                    color: Colors.white70,
+                                    color: context.dynamicWhite70,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -6339,16 +6216,16 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                             const SizedBox(height: 4),
                             Text(
                               rest.cuisine,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.white54,
+                                color: context.dynamicWhite70,
                               ),
                             ),
                             Row(
                               children: [
                                 Row(
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.star_rounded,
                                       color: Colors.amber,
                                       size: 14,
@@ -6356,7 +6233,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                     const SizedBox(width: 4),
                                     Text(
                                       '${rest.rating}',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: Colors.amber,
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
@@ -6367,7 +6244,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                 const SizedBox(width: 12),
                                 Row(
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.access_time_rounded,
                                       color: Colors.amber,
                                       size: 12,
@@ -6375,7 +6252,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                     const SizedBox(width: 4),
                                     Text(
                                       'ساعات العمل: ${rest.workingHoursLabel}',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: Colors.amber,
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
@@ -6409,24 +6286,24 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                     child: TextField(
                       controller: _searchController,
                       onChanged: (v) => setState(() => _searchQuery = v.trim()),
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      style: TextStyle(color: context.dynamicWhite, fontSize: 13),
                       textDirection: TextDirection.rtl,
                       decoration: InputDecoration(
                         hintText: 'ابحث عن وجبة في ${rest.name}...',
-                        hintStyle: const TextStyle(
-                          color: Colors.white38,
+                        hintStyle: TextStyle(
+                          color: context.dynamicWhite70,
                           fontSize: 12.5,
                         ),
-                        prefixIcon: const Icon(
+                        prefixIcon: Icon(
                           Icons.search_rounded,
                           color: Color(0xFFFF8F00),
                           size: 18,
                         ),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.close_rounded,
-                                  color: Colors.white38,
+                                  color: context.dynamicWhite70,
                                   size: 18,
                                 ),
                                 onPressed: () {
@@ -6479,7 +6356,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                 Icon(
                                   cat.icon,
                                   size: 15,
-                                  color: isSel ? Colors.white : Colors.white54,
+                                  color: isSel ? context.dynamicWhite : context.dynamicWhite70,
                                 ),
                                 const SizedBox(width: 5),
                                 Text(
@@ -6488,8 +6365,8 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
                                     color: isSel
-                                        ? Colors.white
-                                        : Colors.white54,
+                                        ? context.dynamicWhite
+                                        : context.dynamicWhite70,
                                   ),
                                 ),
                               ],
@@ -6513,7 +6390,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                         color: const Color(0xFF1E293B),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.05),
+                          color: context.dynamicWhite.withOpacity(0.05),
                         ),
                       ),
                       child: Row(
@@ -6543,11 +6420,11 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                     color: Colors.black.withOpacity(0.6),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: const Center(
+                                  child: Center(
                                     child: Text(
                                       'خلصانة 🛑',
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: context.dynamicWhite,
                                         fontSize: 10.5,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -6568,10 +6445,10 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                     Expanded(
                                       child: Text(
                                         prod.name,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13,
-                                          color: Colors.white,
+                                          color: context.dynamicWhite,
                                         ),
                                       ),
                                     ),
@@ -6589,7 +6466,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                                 prod.id,
                                               )
                                               ? Colors.redAccent
-                                              : Colors.white38,
+                                              : context.dynamicWhite70,
                                           size: 18,
                                         ),
                                       ),
@@ -6601,9 +6478,9 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                   prod.description,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 10.5,
-                                    color: Colors.white54,
+                                    color: context.dynamicWhite70,
                                     height: 1.3,
                                   ),
                                 ),
@@ -6620,16 +6497,16 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                             prod.discountPrice! < prod.price)
                                           Text(
                                             '${prod.price.toStringAsFixed(0)} د.ع',
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 10,
-                                              color: Colors.white38,
+                                              color: context.dynamicWhite70,
                                               decoration:
                                                   TextDecoration.lineThrough,
                                             ),
                                           ),
                                         Text(
                                           '${(prod.discountPrice ?? prod.price).toStringAsFixed(0)} د.ع',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
                                             color: Color(0xFFFF8F00),
@@ -6641,11 +6518,11 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                       ElevatedButton.icon(
                                         onPressed: () =>
                                             controller.addToCart(prod, context),
-                                        icon: const Icon(
+                                        icon: Icon(
                                           Icons.add_shopping_cart,
                                           size: 13,
                                         ),
-                                        label: const Text(
+                                        label: Text(
                                           'أضف',
                                           style: TextStyle(
                                             fontSize: 11,
@@ -6656,7 +6533,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                           backgroundColor: const Color(
                                             0xFFFF8F00,
                                           ),
-                                          foregroundColor: Colors.white,
+                                          foregroundColor: context.dynamicWhite,
                                           elevation: 0,
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 10,
@@ -6684,7 +6561,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                             8,
                                           ),
                                         ),
-                                        child: const Text(
+                                        child: Text(
                                           'نَفَدَت',
                                           style: TextStyle(
                                             color: Colors.redAccent,
@@ -6734,12 +6611,12 @@ class CartScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'سلة المشتريات',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 16,
-            color: Colors.white,
+            color: context.dynamicWhite,
           ),
         ),
         centerTitle: true,
@@ -6757,27 +6634,27 @@ class CartScreen extends StatelessWidget {
                     color: Colors.orange.withOpacity(0.3),
                   ),
                   const SizedBox(height: 14),
-                  const Text(
+                  Text(
                     'السلة فارغة!',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'تصفح قوائم الطعام وأضف وجباتك',
-                    style: TextStyle(fontSize: 11, color: Colors.white54),
+                    style: TextStyle(fontSize: 11, color: context.dynamicWhite70),
                   ),
                   const SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: () => controller.setTab(0),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFFF8F00),
-                      foregroundColor: Colors.white,
+                      foregroundColor: context.dynamicWhite,
                     ),
-                    child: const Text('ابدأ التسوق'),
+                    child: Text('ابدأ التسوق'),
                   ),
                 ],
               ),
@@ -6790,7 +6667,7 @@ class CartScreen extends StatelessWidget {
                   color: const Color(0xFFFF8F00).withOpacity(0.1),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.restaurant,
                         color: Color(0xFFFF8F00),
                         size: 15,
@@ -6798,7 +6675,7 @@ class CartScreen extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         'تطلب من: $restName',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFFFF8F00),
@@ -6820,7 +6697,7 @@ class CartScreen extends StatelessWidget {
                           color: const Color(0xFF1E293B),
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: Colors.white.withOpacity(0.05),
+                            color: context.dynamicWhite.withOpacity(0.05),
                           ),
                         ),
                         child: Row(
@@ -6841,10 +6718,10 @@ class CartScreen extends StatelessWidget {
                                 children: [
                                   Text(
                                     item.product.name,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13,
-                                      color: Colors.white,
+                                      color: context.dynamicWhite,
                                     ),
                                   ),
                                   if (item.product.discountPrice != null &&
@@ -6854,8 +6731,8 @@ class CartScreen extends StatelessWidget {
                                       children: [
                                         Text(
                                           '${item.product.price.toStringAsFixed(0)} د.ع',
-                                          style: const TextStyle(
-                                            color: Colors.white38,
+                                          style: TextStyle(
+                                            color: context.dynamicWhite70,
                                             fontSize: 10,
                                             decoration:
                                                 TextDecoration.lineThrough,
@@ -6864,7 +6741,7 @@ class CartScreen extends StatelessWidget {
                                         const SizedBox(width: 4),
                                         Text(
                                           '${item.product.discountPrice!.toStringAsFixed(0)} د.ع',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             color: Colors.amber,
                                             fontSize: 11,
                                           ),
@@ -6874,14 +6751,14 @@ class CartScreen extends StatelessWidget {
                                   else
                                     Text(
                                       '${item.product.price.toStringAsFixed(0)} د.ع للوجبة',
-                                      style: const TextStyle(
-                                        color: Colors.white54,
+                                      style: TextStyle(
+                                        color: context.dynamicWhite70,
                                         fontSize: 10.5,
                                       ),
                                     ),
                                   Text(
                                     'الإجمالي: ${item.totalPrice.toStringAsFixed(0)} د.ع',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: Color(0xFFFF8F00),
                                       fontWeight: FontWeight.bold,
                                       fontSize: 12,
@@ -6904,10 +6781,10 @@ class CartScreen extends StatelessWidget {
                                           color: const Color(0xFF0F172A),
                                           shape: BoxShape.circle,
                                         ),
-                                        child: const Icon(
+                                        child: Icon(
                                           Icons.remove,
                                           size: 14,
-                                          color: Colors.white,
+                                          color: context.dynamicWhite,
                                         ),
                                       ),
                                     ),
@@ -6917,10 +6794,10 @@ class CartScreen extends StatelessWidget {
                                       ),
                                       child: Text(
                                         '${item.quantity}',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
-                                          color: Colors.white,
+                                          color: context.dynamicWhite,
                                         ),
                                       ),
                                     ),
@@ -6937,7 +6814,7 @@ class CartScreen extends StatelessWidget {
                                           ).withOpacity(0.2),
                                           shape: BoxShape.circle,
                                         ),
-                                        child: const Icon(
+                                        child: Icon(
                                           Icons.add,
                                           size: 14,
                                           color: Color(0xFFFF8F00),
@@ -6950,7 +6827,7 @@ class CartScreen extends StatelessWidget {
                                 InkWell(
                                   onTap: () =>
                                       controller.deleteFromCart(item.product),
-                                  child: const Text(
+                                  child: Text(
                                     'حذف',
                                     style: TextStyle(
                                       color: Colors.redAccent,
@@ -6992,15 +6869,15 @@ class CartScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'مجموع الوجبات',
-                style: TextStyle(color: Colors.white54, fontSize: 12.5),
+                style: TextStyle(color: context.dynamicWhite70, fontSize: 12.5),
               ),
               Text(
                 '${controller.subtotal.toStringAsFixed(0)} د.ع',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                 ),
               ),
             ],
@@ -7009,15 +6886,15 @@ class CartScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'توصيل جيب لي',
-                style: TextStyle(color: Colors.white54, fontSize: 12.5),
+                style: TextStyle(color: context.dynamicWhite70, fontSize: 12.5),
               ),
               Text(
                 '${controller.deliveryFee.toStringAsFixed(0)} د.ع',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                 ),
               ),
             ],
@@ -7027,7 +6904,7 @@ class CartScreen extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   '🌟 خصم النقاط المستبدلة',
                   style: TextStyle(
                     color: Colors.greenAccent,
@@ -7037,7 +6914,7 @@ class CartScreen extends StatelessWidget {
                 ),
                 Text(
                   '-${controller.loyaltyDiscount.toStringAsFixed(0)} د.ع',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.greenAccent,
                   ),
@@ -7094,11 +6971,11 @@ class CartScreen extends StatelessWidget {
                               fontSize: 11.5,
                               fontWeight: FontWeight.bold,
                               color: controller.redeemingPoints
-                                  ? Colors.white
+                                  ? context.dynamicWhite
                                   : (controller.loyaltyPoints >=
                                             JeebliController.pointsPerReward
                                         ? Colors.amber
-                                        : Colors.white54),
+                                        : context.dynamicWhite70),
                             ),
                           ),
                         ],
@@ -7122,17 +6999,17 @@ class CartScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'المبلغ الكلي',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                 ),
               ),
               Text(
                 '${controller.totalAmount.toStringAsFixed(0)} د.ع',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 17,
                   color: Color(0xFFFF8F00),
@@ -7158,12 +7035,12 @@ class CartScreen extends StatelessWidget {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF8F00),
-                foregroundColor: Colors.white,
+                foregroundColor: context.dynamicWhite,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              child: const Text(
+              child: Text(
                 'إتمام الطلب والدفع',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
@@ -7227,12 +7104,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'تأكيد الطلب والدفع',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 16,
-            color: Colors.white,
+            color: context.dynamicWhite,
           ),
         ),
         centerTitle: true,
@@ -7371,17 +7248,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _neighborhoodController,
-                      style: const TextStyle(color: Colors.white),
+                      style: TextStyle(color: context.dynamicWhite),
                       onChanged: (value) {
                         controller.selectedNeighborhood = value;
                         controller.saveSession();
                       },
                       decoration: InputDecoration(
                         labelText: 'المنطقة / الحي',
-                        labelStyle: const TextStyle(color: Colors.white54),
+                        labelStyle: TextStyle(color: context.dynamicWhite70),
                         hintText: 'اكتب اسم المنطقة أو الحي...',
-                        hintStyle: const TextStyle(color: Colors.white30),
-                        prefixIcon: const Icon(
+                        hintStyle: TextStyle(color: Colors.white30),
+                        prefixIcon: Icon(
                           Icons.location_on_outlined,
                           color: Colors.amber,
                         ),
@@ -7400,7 +7277,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ),
                         ),
                         filled: true,
-                        fillColor: Colors.white.withOpacity(0.05),
+                        fillColor: context.dynamicWhite.withOpacity(0.05),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -7452,14 +7329,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     if (!_formKey.currentState!.validate()) return;
                     _showOrderReviewConfirmationDialog(context, controller);
                   },
-                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                  label: const Text(
+                  icon: Icon(Icons.check_circle_outline, size: 18),
+                  label: Text(
                     'إرسال الطلب للمطعم 🚀',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFF8F00),
-                    foregroundColor: Colors.white,
+                    foregroundColor: context.dynamicWhite,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -7476,10 +7353,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   Widget _sectionTitle(String title) => Text(
     title,
-    style: const TextStyle(
+    style: TextStyle(
       fontWeight: FontWeight.bold,
       fontSize: 14.5,
-      color: Colors.white,
+      color: context.dynamicWhite,
     ),
   );
 
@@ -7495,12 +7372,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
-      style: const TextStyle(color: Colors.white),
+      style: TextStyle(color: context.dynamicWhite),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        labelStyle: const TextStyle(color: Colors.white54),
-        hintStyle: const TextStyle(color: Colors.white30),
+        labelStyle: TextStyle(color: context.dynamicWhite70),
+        hintStyle: TextStyle(color: Colors.white30),
         prefixIcon: Icon(icon, size: 20, color: Colors.amber),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -7515,7 +7392,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           borderSide: const BorderSide(color: Color(0xFFFF8F00)),
         ),
         filled: true,
-        fillColor: Colors.white.withOpacity(0.05),
+        fillColor: context.dynamicWhite.withOpacity(0.05),
       ),
       validator: validator,
       onChanged: onChanged,
@@ -7547,7 +7424,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           children: [
             Icon(
               icon,
-              color: isSelected ? const Color(0xFFFF8F00) : Colors.white54,
+              color: isSelected ? const Color(0xFFFF8F00) : context.dynamicWhite70,
               size: 26,
             ),
             const SizedBox(height: 6),
@@ -7556,12 +7433,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: isSelected ? const Color(0xFFFF8F00) : Colors.white54,
+                color: isSelected ? const Color(0xFFFF8F00) : context.dynamicWhite70,
               ),
             ),
             Text(
               subtitle,
-              style: const TextStyle(fontSize: 9.5, color: Colors.white38),
+              style: TextStyle(fontSize: 9.5, color: context.dynamicWhite70),
               textAlign: TextAlign.center,
             ),
           ],
@@ -7588,12 +7465,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'بيانات الماستركارد',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                 ),
               ),
               Row(
@@ -7623,15 +7500,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           TextFormField(
             keyboardType: TextInputType.number,
             maxLength: 16,
-            style: const TextStyle(color: Colors.white, letterSpacing: 2),
+            style: TextStyle(color: context.dynamicWhite, letterSpacing: 2),
             decoration: InputDecoration(
               labelText: 'رقم البطاقة',
               hintText: 'XXXX XXXX XXXX XXXX',
-              labelStyle: const TextStyle(color: Colors.white54),
-              hintStyle: const TextStyle(color: Colors.white30),
-              prefixIcon: const Icon(
+              labelStyle: TextStyle(color: context.dynamicWhite70),
+              hintStyle: TextStyle(color: Colors.white30),
+              prefixIcon: Icon(
                 Icons.credit_card,
-                color: Colors.white70,
+                color: context.dynamicWhite70,
                 size: 20,
               ),
               border: OutlineInputBorder(
@@ -7647,7 +7524,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 borderSide: const BorderSide(color: Color(0xFFFF8F00)),
               ),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.05),
+              fillColor: context.dynamicWhite.withOpacity(0.05),
             ),
           ),
           const SizedBox(height: 8),
@@ -7655,15 +7532,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             children: [
               Expanded(
                 child: TextFormField(
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: context.dynamicWhite),
                   decoration: InputDecoration(
                     labelText: 'تاريخ الانتهاء',
                     hintText: 'MM/YY',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    hintStyle: const TextStyle(color: Colors.white30),
-                    prefixIcon: const Icon(
+                    labelStyle: TextStyle(color: context.dynamicWhite70),
+                    hintStyle: TextStyle(color: Colors.white30),
+                    prefixIcon: Icon(
                       Icons.calendar_month_outlined,
-                      color: Colors.white70,
+                      color: context.dynamicWhite70,
                       size: 18,
                     ),
                     border: OutlineInputBorder(
@@ -7679,7 +7556,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       borderSide: const BorderSide(color: Color(0xFFFFB300)),
                     ),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.07),
+                    fillColor: context.dynamicWhite.withOpacity(0.07),
                   ),
                   onChanged: (v) => controller.cardExpiry = v,
                 ),
@@ -7689,15 +7566,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 child: TextFormField(
                   maxLength: 3,
                   obscureText: true,
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: context.dynamicWhite),
                   decoration: InputDecoration(
                     labelText: 'CVV',
                     hintText: '***',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    hintStyle: const TextStyle(color: Colors.white30),
-                    prefixIcon: const Icon(
+                    labelStyle: TextStyle(color: context.dynamicWhite70),
+                    hintStyle: TextStyle(color: Colors.white30),
+                    prefixIcon: Icon(
                       Icons.lock_outline,
-                      color: Colors.white70,
+                      color: context.dynamicWhite70,
                       size: 18,
                     ),
                     border: OutlineInputBorder(
@@ -7712,9 +7589,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: Color(0xFFFFB300)),
                     ),
-                    counterStyle: const TextStyle(color: Colors.white30),
+                    counterStyle: TextStyle(color: Colors.white30),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.07),
+                    fillColor: context.dynamicWhite.withOpacity(0.07),
                   ),
                   onChanged: (v) => controller.cardCvv = v,
                 ),
@@ -7736,13 +7613,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.shield_outlined, color: Colors.green, size: 22),
+          Icon(Icons.shield_outlined, color: Colors.green, size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'محمي بتشفير جيب لي 🔒',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
@@ -7774,22 +7651,22 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           decoration: BoxDecoration(
             color: const Color(0xFF1E293B),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.05)),
+            border: Border.all(color: context.dynamicWhite.withOpacity(0.05)),
           ),
           child: Column(
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'مجموع الوجبات',
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 12),
                   ),
                   Text(
                     '${controller.subtotal.toStringAsFixed(0)} د.ع',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                     ),
                   ),
                 ],
@@ -7798,15 +7675,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'توصيل جيب لي',
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 12),
                   ),
                   Text(
                     '${controller.deliveryFee.toStringAsFixed(0)} د.ع',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                     ),
                   ),
                 ],
@@ -7815,16 +7692,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'الإجمالي الكلي',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                     ),
                   ),
                   Text(
                     '${controller.totalAmount.toStringAsFixed(0)} د.ع',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: Color(0xFFFF8F00),
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
@@ -7855,7 +7732,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          title: const Row(
+          title: Row(
             children: [
               Icon(
                 Icons.assignment_turned_in_rounded,
@@ -7866,7 +7743,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               Text(
                 'مراجعة وتأكيد الطلب 📋',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
@@ -7878,15 +7755,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'يرجى التأكد من صحة بيانات التوصيل قبل الإرسال:',
-                  style: TextStyle(color: Colors.white70, fontSize: 12.5),
+                  style: TextStyle(color: context.dynamicWhite70, fontSize: 12.5),
                 ),
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
+                    color: context.dynamicWhite.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -7895,7 +7772,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     children: [
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.person_rounded,
                             color: Colors.amber,
                             size: 16,
@@ -7904,8 +7781,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           Expanded(
                             child: Text(
                               'الاسم: ${controller.customerName}',
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: context.dynamicWhite,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -7916,7 +7793,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.phone_rounded,
                             color: Colors.amber,
                             size: 16,
@@ -7925,8 +7802,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           Expanded(
                             child: Text(
                               'الهاتف: ${controller.customerPhone}',
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: context.dynamicWhite,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -7937,7 +7814,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.location_on_rounded,
                             color: Colors.amber,
                             size: 16,
@@ -7946,8 +7823,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           Expanded(
                             child: Text(
                               'العنوان: ${controller.selectedNeighborhood} - ${controller.streetDetails}',
-                              style: const TextStyle(
-                                color: Colors.white70,
+                              style: TextStyle(
+                                color: context.dynamicWhite70,
                                 fontSize: 12,
                               ),
                             ),
@@ -7986,16 +7863,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'المبلغ الكلي:',
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: context.dynamicWhite70,
                               fontSize: 12,
                             ),
                           ),
                           Text(
                             '${controller.totalAmount.toStringAsFixed(0)} د.ع',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Color(0xFFFF8F00),
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
@@ -8012,7 +7889,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text(
+              child: Text(
                 'تعديل ✏️',
                 style: TextStyle(
                   color: Colors.amber,
@@ -8049,12 +7926,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF8F00),
-                foregroundColor: Colors.white,
+                foregroundColor: context.dynamicWhite,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text(
+              child: Text(
                 'تأكيد وإرسال ✅',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
@@ -8120,12 +7997,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'تتبع الطلب المباشر 🛵',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 16,
-            color: Colors.white,
+            color: context.dynamicWhite,
           ),
         ),
         centerTitle: true,
@@ -8165,9 +8042,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           color: Colors.green,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.store,
-                          color: Colors.white,
+                          color: context.dynamicWhite,
                           size: 20,
                         ),
                       ),
@@ -8183,9 +8060,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                             color: Color(0xFFE65100),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.home,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                             size: 20,
                           ),
                         ),
@@ -8206,7 +8083,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               color: Color(0xFFFFB300),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(
+                            child: Icon(
                               Icons.delivery_dining,
                               color: Colors.black,
                               size: 24,
@@ -8231,13 +8108,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
+                      Text(
                         'الوقت المتبقي المقدر:',
-                        style: TextStyle(color: Colors.white54, fontSize: 13),
+                        style: TextStyle(color: context.dynamicWhite70, fontSize: 13),
                       ),
                       Text(
                         '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFFFF8F00),
@@ -8254,7 +8131,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           color: const Color(0xFFFF8F00).withOpacity(0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.info_outline,
                           color: Color(0xFFFF8F00),
                           size: 18,
@@ -8264,10 +8141,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                       Expanded(
                         child: Text(
                           _getStatusText(controller.orderStatus),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                           ),
                         ),
                       ),
@@ -8289,7 +8166,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                   CircleAvatar(
                     backgroundColor: Colors.blue.withOpacity(0.2),
                     radius: 24,
-                    child: const Icon(
+                    child: Icon(
                       Icons.person,
                       color: Colors.blue,
                       size: 28,
@@ -8302,21 +8179,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                       children: [
                         Text(
                           controller.driverName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                           ),
                         ),
-                        const Text(
+                        Text(
                           'مندوب توصيل جيب لي السريع',
-                          style: TextStyle(color: Colors.white54, fontSize: 11),
+                          style: TextStyle(color: context.dynamicWhite70, fontSize: 11),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.phone, color: Colors.green),
+                    icon: Icon(Icons.phone, color: Colors.green),
                     onPressed: () =>
                         launchUrl(Uri.parse('tel:${controller.driverPhone}')),
                   ),
@@ -8351,7 +8228,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'انتقل لتقييم الوجبة والمندوب ⭐',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
@@ -8371,20 +8248,20 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                     ),
                     child: Column(
                       children: [
-                        const Row(
+                        Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
                               Icons.lock_outline,
                               size: 14,
-                              color: Colors.white54,
+                              color: context.dynamicWhite70,
                             ),
                             SizedBox(width: 6),
                             Text(
                               'توكن أمان الطلب المشفر',
                               style: TextStyle(
                                 fontSize: 10.5,
-                                color: Colors.white54,
+                                color: context.dynamicWhite70,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -8393,10 +8270,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                         const SizedBox(height: 4),
                         SelectableText(
                           controller.lastOrderToken,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 10,
-                            color: Colors.white38,
+                            color: context.dynamicWhite70,
                             fontWeight: FontWeight.bold,
                           ),
                           textAlign: TextAlign.center,
@@ -8487,12 +8364,12 @@ class _RatingScreenState extends State<RatingScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'قيّم تجربتك معنا ⭐',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 16,
-            color: Colors.white,
+            color: context.dynamicWhite,
           ),
         ),
         centerTitle: true,
@@ -8533,23 +8410,23 @@ class _RatingScreenState extends State<RatingScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'ملاحظاتك وشكاواك 📝',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                     ),
                   ),
                   const SizedBox(height: 10),
                   TextField(
                     maxLines: 4,
-                    style: const TextStyle(color: Colors.white),
+                    style: TextStyle(color: context.dynamicWhite),
                     decoration: InputDecoration(
                       hintText: 'أخبرنا برأيك بصدق...',
-                      hintStyle: const TextStyle(
+                      hintStyle: TextStyle(
                         fontSize: 12,
-                        color: Colors.white38,
+                        color: context.dynamicWhite70,
                       ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -8564,7 +8441,7 @@ class _RatingScreenState extends State<RatingScreen> {
                         borderSide: const BorderSide(color: Color(0xFFFF8F00)),
                       ),
                       filled: true,
-                      fillColor: Colors.white.withOpacity(0.05),
+                      fillColor: context.dynamicWhite.withOpacity(0.05),
                     ),
                     onChanged: (v) => controller.feedbackText = v,
                   ),
@@ -8607,7 +8484,7 @@ class _RatingScreenState extends State<RatingScreen> {
                                   ),
                                   child: Text(
                                     tag,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 11,
                                       color: Color(0xFFFF8F00),
                                     ),
@@ -8655,7 +8532,7 @@ class _RatingScreenState extends State<RatingScreen> {
                     borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-                child: const Text(
+                child: Text(
                   'إرسال التقييم وإغلاق الطلب ✅',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
@@ -8692,15 +8569,15 @@ class _RatingScreenState extends State<RatingScreen> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                     ),
                   ),
                   Text(
                     subtitle,
-                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 11),
                   ),
                 ],
               ),
@@ -8733,7 +8610,7 @@ class _RatingScreenState extends State<RatingScreen> {
             currentRating == 0 ? 'اضغط لتقييم' : _ratingLabel(currentRating),
             style: TextStyle(
               color: currentRating == 0
-                  ? Colors.white38
+                  ? context.dynamicWhite70
                   : const Color(0xFFFF8F00),
               fontWeight: FontWeight.bold,
               fontSize: 13,
@@ -8780,28 +8657,28 @@ class ThankYouScreen extends StatelessWidget {
                   ),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.favorite_rounded,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                   size: 64,
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
+              Text(
                 'شكراً لتقييمك! ❤️',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                 ),
               ),
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 'آراؤكم تساعدنا في تطوير "جيب لي" وتقديم أفضل خدمة توصيل دائماً ⭐️',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 13,
-                  color: Colors.white54,
+                  color: context.dynamicWhite70,
                   height: 1.6,
                 ),
               ),
@@ -8831,12 +8708,12 @@ class ThankYouScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           'المطعم',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                           ),
                         ),
                       ],
@@ -8857,12 +8734,12 @@ class ThankYouScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           'المندوب',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                           ),
                         ),
                       ],
@@ -8890,12 +8767,12 @@ class ThankYouScreen extends StatelessWidget {
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFF8F00),
-                    foregroundColor: Colors.white,
+                    foregroundColor: context.dynamicWhite,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
                   ),
-                  child: const Text(
+                  child: Text(
                     'طلب وجبة جديدة 🍔',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                   ),
@@ -8940,27 +8817,27 @@ void showWelcomeDialog(BuildContext context, String userRole) {
                         colors: [Color(0xFF22C55E), Color(0xFF16A34A)],
                       ),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.stars_rounded,
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                       size: 38,
                     ),
                   ),
                   const SizedBox(height: 18),
-                  const Text(
+                  Text(
                     'أهلاً بك في جيب لي 🖐️',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 10),
-                  const Text(
+                  Text(
                     'تصفح أفضل المطاعم القريبة منك، واطلب وجبتك المفضلة وتصلك فوراً بأسرع وقت ⚡',
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: context.dynamicWhite70,
                       fontSize: 13,
                       height: 1.6,
                     ),
@@ -8974,13 +8851,13 @@ void showWelcomeDialog(BuildContext context, String userRole) {
                       onPressed: () => Navigator.of(context).pop(),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFFF8F00),
-                        foregroundColor: Colors.white,
+                        foregroundColor: context.dynamicWhite,
                         elevation: 4,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      child: const Text(
+                      child: Text(
                         'اكتشف المطاعم الآن 🚀',
                         style: TextStyle(
                           fontSize: 15,
@@ -9014,9 +8891,9 @@ class RestaurantOrdersNotifScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'الطلبات الواردة 🔔',
-          style: TextStyle(color: Colors.white, fontSize: 16),
+          style: TextStyle(color: context.dynamicWhite, fontSize: 16),
         ),
         backgroundColor: const Color(0xFF1E293B),
         leading: const JeebliBackButton(),
@@ -9033,10 +8910,10 @@ class RestaurantOrdersNotifScreen extends StatelessWidget {
               child: CircularProgressIndicator(color: Colors.amber),
             );
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
+            return Center(
               child: Text(
                 'لا توجد طلبات جديدة حالياً.',
-                style: TextStyle(color: Colors.white70),
+                style: TextStyle(color: context.dynamicWhite70),
               ),
             );
           }
@@ -9056,25 +8933,25 @@ class RestaurantOrdersNotifScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: ListTile(
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.receipt_long,
                     color: Colors.amber,
                     size: 30,
                   ),
                   title: Text(
                     'طلب جديد من: $custName',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: context.dynamicWhite,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   subtitle: Text(
                     'الإجمالي: $total د.ع\nرقم الطلب: ${doc.id.substring(0, 6)}',
-                    style: const TextStyle(color: Colors.white70),
+                    style: TextStyle(color: context.dynamicWhite70),
                   ),
-                  trailing: const Icon(
+                  trailing: Icon(
                     Icons.arrow_forward_ios,
-                    color: Colors.white54,
+                    color: context.dynamicWhite70,
                     size: 16,
                   ),
                   isThreeLine: true,
@@ -9109,12 +8986,12 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'لوحة تحكم المطعم ⚙️',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 16,
-            color: Colors.white,
+            color: context.dynamicWhite,
           ),
         ),
         centerTitle: true,
@@ -9134,7 +9011,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                 alignment: Alignment.center,
                 children: [
                   IconButton(
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.notifications_active_rounded,
                       color: Colors.amber,
                     ),
@@ -9158,9 +9035,9 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                         ),
                         child: Text(
                           '$pendingCount',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -9171,7 +9048,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.edit_note_rounded, color: Colors.amber),
+            icon: Icon(Icons.edit_note_rounded, color: Colors.amber),
             tooltip: 'تعديل بيانات المطعم',
             onPressed: () => _showOwnerEditRestaurantDialog(
               context,
@@ -9180,7 +9057,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.logout, color: Colors.redAccent),
+            icon: Icon(Icons.logout, color: Colors.redAccent),
             tooltip: 'تسجيل الخروج',
             onPressed: () => _showLogoutDialog(context, controller),
           ),
@@ -9193,10 +9070,10 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           controller.userRestaurantId ?? 'akkala',
         ),
         backgroundColor: const Color(0xFFFF8F00),
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
+        icon: Icon(Icons.add, color: context.dynamicWhite),
+        label: Text(
           'إضافة وجبة',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: context.dynamicWhite, fontWeight: FontWeight.bold),
         ),
       ),
       body: ListView(
@@ -9213,7 +9090,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.amber.withOpacity(0.3)),
             ),
-            child: const Row(
+            child: Row(
               children: [
                 Icon(
                   Icons.admin_panel_settings_rounded,
@@ -9227,7 +9104,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.4,
-                      color: Colors.white70,
+                      color: context.dynamicWhite70,
                     ),
                   ),
                 ),
@@ -9266,15 +9143,15 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.store_mall_directory_outlined,
                           color: Colors.white30,
                           size: 48,
                         ),
                         const SizedBox(height: 12),
-                        const Text(
+                        Text(
                           'لم يتم العثور على مطعمك.\nتواصل مع الإدارة.',
-                          style: TextStyle(color: Colors.white54, fontSize: 14),
+                          style: TextStyle(color: context.dynamicWhite70, fontSize: 14),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -9326,7 +9203,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             ),
           ],
         ),
-        child: const Row(
+        child: Row(
           children: [
             Icon(
               Icons.two_wheeler_rounded,
@@ -9349,7 +9226,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                   SizedBox(height: 4),
                   Text(
                     'عرض المندوبين الخاصين بك، تعديل بياناتهم، أو حذفهم',
-                    style: TextStyle(color: Colors.white54, fontSize: 11),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 11),
                   ),
                 ],
               ),
@@ -9462,9 +9339,9 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                       isCurrentlyClosed
                           ? 'الزبائن لا يستطيعون الطلب الآن'
                           : 'الزبائن يستطيعون الطلب منك الآن',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: Colors.white54,
+                        color: context.dynamicWhite70,
                       ),
                     ),
                   ],
@@ -9511,7 +9388,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                           child: Icon(
                             isClosedManually ? Icons.lock : Icons.lock_open,
                             size: 14,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                           ),
                         ),
                       ),
@@ -9526,19 +9403,19 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.access_time_filled_rounded,
-                color: Colors.white54,
+                color: context.dynamicWhite70,
                 size: 16,
               ),
               const SizedBox(width: 6),
-              const Text(
+              Text(
                 'ساعات العمل: ',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
+                style: TextStyle(color: context.dynamicWhite70, fontSize: 12),
               ),
               Text(
                 restaurant.workingHoursLabel,
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.amber,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -9575,27 +9452,27 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.location_on_rounded,
                 color: Colors.amber,
                 size: 24,
               ),
-              const SizedBox(width: 10),
-              const Expanded(
+              SizedBox(width: 10),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'موقع المطعم الجغرافي (GPS) 📍',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: context.dynamicWhite,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
                     ),
                     Text(
                       'تحديد الموقع بدقة يظهر مطعمك للزبائن القريبين أولاً',
-                      style: TextStyle(color: Colors.white60, fontSize: 11),
+                      style: TextStyle(color: context.dynamicWhite70, fontSize: 11),
                     ),
                   ],
                 ),
@@ -9606,7 +9483,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           if (hasLoc)
             Text(
               'الإحداثيات الحالية: ${rest.restaurantLat!.toStringAsFixed(4)}, ${rest.restaurantLng!.toStringAsFixed(4)}',
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.greenAccent,
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
@@ -9646,19 +9523,19 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                   );
                 }
               },
-              icon: const Icon(
+              icon: Icon(
                 Icons.my_location_rounded,
-                color: Colors.white,
+                color: context.dynamicWhite,
                 size: 18,
               ),
               label: Text(
                 hasLoc
                     ? 'تحديث موقع المطعم الحقيقي (GPS)'
                     : 'التقاط موقع المطعم الحالي (GPS)',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                 ),
               ),
               style: ElevatedButton.styleFrom(
@@ -9698,7 +9575,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
+              Row(
                 children: [
                   Icon(
                     Icons.local_offer_rounded,
@@ -9709,7 +9586,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                   Text(
                     'عروض وتخفيضات المطعم 🎁',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                     ),
@@ -9719,12 +9596,12 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               ElevatedButton.icon(
                 onPressed: () =>
                     _showAddOfferDialog(context, controller, restId),
-                icon: const Icon(Icons.add, size: 16, color: Colors.white),
-                label: const Text(
+                icon: Icon(Icons.add, size: 16, color: context.dynamicWhite),
+                label: Text(
                   'إضافة عرض',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -9743,9 +9620,9 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           if (myOffers.isEmpty)
-            const Text(
+            Text(
               'لا توجد عروض نشطة حالياً. أضف عرضك ليظهر للزبائن في أعلى التطبيق!',
-              style: TextStyle(color: Colors.white54, fontSize: 11),
+              style: TextStyle(color: context.dynamicWhite70, fontSize: 11),
             )
           else
             Column(
@@ -9754,7 +9631,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
+                    color: context.dynamicWhite.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
@@ -9775,15 +9652,15 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                           children: [
                             Text(
                               offer.title,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: context.dynamicWhite,
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             Text(
                               offer.discountTag,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: Colors.amber,
                                 fontSize: 10,
                               ),
@@ -9804,7 +9681,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                         onPressed: () => controller.toggleOfferActive(offer.id),
                       ),
                       IconButton(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.delete_outline,
                           color: Colors.redAccent,
                           size: 20,
@@ -9844,9 +9721,9 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          title: const Text(
+          title: Text(
             'إضافة عرض جديد 🎁',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            style: TextStyle(color: context.dynamicWhite, fontWeight: FontWeight.bold),
           ),
           content: SingleChildScrollView(
             child: Column(
@@ -9854,26 +9731,26 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               children: [
                 TextField(
                   controller: titleC,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
+                  style: TextStyle(color: context.dynamicWhite),
+                  decoration: InputDecoration(
                     labelText: 'عنوان العرض (مثال: وجبة عائلية)',
-                    labelStyle: TextStyle(color: Colors.white70),
+                    labelStyle: TextStyle(color: context.dynamicWhite70),
                   ),
                 ),
                 TextField(
                   controller: descC,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
+                  style: TextStyle(color: context.dynamicWhite),
+                  decoration: InputDecoration(
                     labelText: 'تفاصيل العرض',
-                    labelStyle: TextStyle(color: Colors.white70),
+                    labelStyle: TextStyle(color: context.dynamicWhite70),
                   ),
                 ),
                 TextField(
                   controller: tagC,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
+                  style: TextStyle(color: context.dynamicWhite),
+                  decoration: InputDecoration(
                     labelText: 'شارة العرض (مثل: خصم 20% / توفير)',
-                    labelStyle: TextStyle(color: Colors.white70),
+                    labelStyle: TextStyle(color: context.dynamicWhite70),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -9882,15 +9759,15 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                     Expanded(
                       child: TextField(
                         controller: imgC,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
+                        style: TextStyle(color: context.dynamicWhite),
+                        decoration: InputDecoration(
                           labelText: 'رابط صورة العرض',
-                          labelStyle: TextStyle(color: Colors.white70),
+                          labelStyle: TextStyle(color: context.dynamicWhite70),
                         ),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.photo_library,
                         color: Colors.amber,
                       ),
@@ -9908,7 +9785,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+              child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
               onPressed: () {
@@ -9936,9 +9813,9 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.purpleAccent,
-                foregroundColor: Colors.white,
+                foregroundColor: context.dynamicWhite,
               ),
-              child: const Text(
+              child: Text(
                 'نشر العرض 🚀',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
@@ -9968,16 +9845,16 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
             child: Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.notifications_active_rounded,
                   color: Color(0xFFFF8F00),
                   size: 22,
                 ),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'الطلبات الواردة 🔔',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                   ),
@@ -9995,7 +9872,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                       color: const Color(0xFFFF8F00).withOpacity(0.4),
                     ),
                   ),
-                  child: const Text(
+                  child: Text(
                     'مباشر 🔴',
                     style: TextStyle(
                       color: Color(0xFFFF8F00),
@@ -10045,12 +9922,12 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               }
 
               if (docs.isEmpty) {
-                return const Padding(
+                return Padding(
                   padding: EdgeInsets.all(20),
                   child: Center(
                     child: Text(
                       'لا توجد طلبات واردة حتى الآن 📭',
-                      style: TextStyle(color: Colors.white38, fontSize: 13),
+                      style: TextStyle(color: context.dynamicWhite70, fontSize: 13),
                     ),
                   ),
                 );
@@ -10110,8 +9987,8 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 '$customer  •  $neighborhood',
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: context.dynamicWhite,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
                                 ),
@@ -10150,19 +10027,19 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(16),
                                       ),
-                                      title: const Text(
+                                      title: Text(
                                         'تأكيد الحذف',
-                                        style: TextStyle(color: Colors.white),
+                                        style: TextStyle(color: context.dynamicWhite),
                                       ),
-                                      content: const Text(
+                                      content: Text(
                                         'هل أنت متأكد من حذف هذا الطلب نهائياً؟',
-                                        style: TextStyle(color: Colors.white70),
+                                        style: TextStyle(color: context.dynamicWhite70),
                                       ),
                                       actions: [
                                         TextButton(
                                           onPressed: () =>
                                               Navigator.pop(ctx, false),
-                                          child: const Text(
+                                          child: Text(
                                             'إلغاء',
                                             style: TextStyle(
                                               color: Colors.grey,
@@ -10172,7 +10049,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                         TextButton(
                                           onPressed: () =>
                                               Navigator.pop(ctx, true),
-                                          child: const Text(
+                                          child: Text(
                                             'حذف',
                                             style: TextStyle(
                                               color: Colors.redAccent,
@@ -10201,7 +10078,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                   color: Colors.redAccent.withOpacity(0.1),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.delete_outline_rounded,
                                   color: Colors.redAccent,
                                   size: 18,
@@ -10214,8 +10091,8 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             'أقرب نقطة دالة: $streetDetails',
-                            style: const TextStyle(
-                              color: Colors.white70,
+                            style: TextStyle(
+                              color: context.dynamicWhite70,
                               fontSize: 11,
                             ),
                           ),
@@ -10225,8 +10102,8 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                           children: [
                             Text(
                               '📞 $phone  |  💰 $total د.ع',
-                              style: const TextStyle(
-                                color: Colors.white54,
+                              style: TextStyle(
+                                color: context.dynamicWhite70,
                                 fontSize: 11.5,
                               ),
                             ),
@@ -10235,8 +10112,8 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                 data['createdAt'] is Timestamp)
                               Text(
                                 '${(data['createdAt'] as Timestamp).toDate().hour}:${(data['createdAt'] as Timestamp).toDate().minute.toString().padLeft(2, '0')}',
-                                style: const TextStyle(
-                                  color: Colors.white38,
+                                style: TextStyle(
+                                  color: context.dynamicWhite70,
                                   fontSize: 10,
                                 ),
                               ),
@@ -10258,12 +10135,12 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                   );
                                 }
                               },
-                              icon: const Icon(
+                              icon: Icon(
                                 Icons.map_rounded,
                                 size: 14,
                                 color: Color(0xFFFF8F00),
                               ),
-                              label: const Text(
+                              label: Text(
                                 '📍 فتح موقع الزبون على الخريطة',
                                 style: TextStyle(
                                   color: Color(0xFFFF8F00),
@@ -10288,10 +10165,10 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                           ),
                         ],
                         const SizedBox(height: 8),
-                        const Text(
+                        Text(
                           '📋 تفاصيل الطلب:',
                           style: TextStyle(
-                            color: Colors.white54,
+                            color: context.dynamicWhite70,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),
@@ -10320,7 +10197,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                   ),
                                   child: Text(
                                     '$iQty',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: Color(0xFFFF8F00),
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold,
@@ -10331,16 +10208,16 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     iName,
-                                    style: const TextStyle(
-                                      color: Colors.white70,
+                                    style: TextStyle(
+                                      color: context.dynamicWhite70,
                                       fontSize: 11,
                                     ),
                                   ),
                                 ),
                                 Text(
                                   '$iPrice د.ع',
-                                  style: const TextStyle(
-                                    color: Colors.white54,
+                                  style: TextStyle(
+                                    color: context.dynamicWhite70,
                                     fontSize: 10,
                                   ),
                                 ),
@@ -10392,25 +10269,25 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                         .withOpacity(0.4),
                                                   ),
                                                 ),
-                                                child: const Icon(
+                                                child: Icon(
                                                   Icons.delivery_dining_rounded,
                                                   color: Colors.greenAccent,
                                                   size: 32,
                                                 ),
                                               ),
                                               const SizedBox(height: 10),
-                                              const Text(
+                                              Text(
                                                 'تعيين مندوب التوصيل',
                                                 style: TextStyle(
-                                                  color: Colors.white,
+                                                  color: context.dynamicWhite,
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.bold,
                                                 ),
                                               ),
                                               Text(
                                                 'طلب: $customerName2',
-                                                style: const TextStyle(
-                                                  color: Colors.white54,
+                                                style: TextStyle(
+                                                  color: context.dynamicWhite70,
                                                   fontSize: 11,
                                                 ),
                                               ),
@@ -10425,23 +10302,23 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                               const SizedBox(height: 8),
                                               TextField(
                                                 controller: driverNameCtrl,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
+                                                style: TextStyle(
+                                                  color: context.dynamicWhite,
                                                 ),
                                                 textDirection:
                                                     TextDirection.rtl,
                                                 decoration: InputDecoration(
                                                   hintText: 'اسم المندوب',
-                                                  hintStyle: const TextStyle(
-                                                    color: Colors.white38,
+                                                  hintStyle: TextStyle(
+                                                    color: context.dynamicWhite70,
                                                   ),
-                                                  prefixIcon: const Icon(
+                                                  prefixIcon: Icon(
                                                     Icons.person_rounded,
                                                     color: Color(0xFFFF8F00),
                                                     size: 18,
                                                   ),
                                                   filled: true,
-                                                  fillColor: Colors.white
+                                                  fillColor: context.dynamicWhite
                                                       .withOpacity(0.05),
                                                   border: OutlineInputBorder(
                                                     borderRadius:
@@ -10449,7 +10326,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                           12,
                                                         ),
                                                     borderSide: BorderSide(
-                                                      color: Colors.white
+                                                      color: context.dynamicWhite
                                                           .withOpacity(0.1),
                                                     ),
                                                   ),
@@ -10460,7 +10337,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                               12,
                                                             ),
                                                         borderSide: BorderSide(
-                                                          color: Colors.white
+                                                          color: context.dynamicWhite
                                                               .withOpacity(0.1),
                                                         ),
                                                       ),
@@ -10482,8 +10359,8 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                               const SizedBox(height: 12),
                                               TextField(
                                                 controller: driverPhoneCtrl,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
+                                                style: TextStyle(
+                                                  color: context.dynamicWhite,
                                                 ),
                                                 keyboardType:
                                                     TextInputType.phone,
@@ -10492,16 +10369,16 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                 decoration: InputDecoration(
                                                   hintText:
                                                       'رقم هاتف المندوب (07...)',
-                                                  hintStyle: const TextStyle(
-                                                    color: Colors.white38,
+                                                  hintStyle: TextStyle(
+                                                    color: context.dynamicWhite70,
                                                   ),
-                                                  prefixIcon: const Icon(
+                                                  prefixIcon: Icon(
                                                     Icons.phone_rounded,
                                                     color: Color(0xFFFF8F00),
                                                     size: 18,
                                                   ),
                                                   filled: true,
-                                                  fillColor: Colors.white
+                                                  fillColor: context.dynamicWhite
                                                       .withOpacity(0.05),
                                                   border: OutlineInputBorder(
                                                     borderRadius:
@@ -10509,7 +10386,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                           12,
                                                         ),
                                                     borderSide: BorderSide(
-                                                      color: Colors.white
+                                                      color: context.dynamicWhite
                                                           .withOpacity(0.1),
                                                     ),
                                                   ),
@@ -10520,7 +10397,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                               12,
                                                             ),
                                                         borderSide: BorderSide(
-                                                          color: Colors.white
+                                                          color: context.dynamicWhite
                                                               .withOpacity(0.1),
                                                         ),
                                                       ),
@@ -10542,23 +10419,23 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                               const SizedBox(height: 12),
                                               TextField(
                                                 controller: driverPassCtrl,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
+                                                style: TextStyle(
+                                                  color: context.dynamicWhite,
                                                 ),
                                                 textDirection:
                                                     TextDirection.ltr,
                                                 decoration: InputDecoration(
                                                   hintText: 'كلمة سر المندوب',
-                                                  hintStyle: const TextStyle(
-                                                    color: Colors.white38,
+                                                  hintStyle: TextStyle(
+                                                    color: context.dynamicWhite70,
                                                   ),
-                                                  prefixIcon: const Icon(
+                                                  prefixIcon: Icon(
                                                     Icons.lock_rounded,
                                                     color: Color(0xFFFF8F00),
                                                     size: 18,
                                                   ),
                                                   filled: true,
-                                                  fillColor: Colors.white
+                                                  fillColor: context.dynamicWhite
                                                       .withOpacity(0.05),
                                                   border: OutlineInputBorder(
                                                     borderRadius:
@@ -10566,7 +10443,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                           12,
                                                         ),
                                                     borderSide: BorderSide(
-                                                      color: Colors.white
+                                                      color: context.dynamicWhite
                                                           .withOpacity(0.1),
                                                     ),
                                                   ),
@@ -10577,7 +10454,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                               12,
                                                             ),
                                                         borderSide: BorderSide(
-                                                          color: Colors.white
+                                                          color: context.dynamicWhite
                                                               .withOpacity(0.1),
                                                         ),
                                                       ),
@@ -10597,11 +10474,11 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                 ),
                                               ),
                                               const SizedBox(height: 8),
-                                              const Text(
+                                              Text(
                                                 'سيتم إرسال الطلب لهذا المندوب فوراً وإنشاء حساب له إذا لم يكن موجوداً.',
                                                 textAlign: TextAlign.center,
                                                 style: TextStyle(
-                                                  color: Colors.white38,
+                                                  color: context.dynamicWhite70,
                                                   fontSize: 10,
                                                 ),
                                               ),
@@ -10613,10 +10490,10 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                             TextButton(
                                               onPressed: () =>
                                                   Navigator.pop(ctx),
-                                              child: const Text(
+                                              child: Text(
                                                 'إلغاء',
                                                 style: TextStyle(
-                                                  color: Colors.white38,
+                                                  color: context.dynamicWhite70,
                                                 ),
                                               ),
                                             ),
@@ -10718,11 +10595,11 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                                   );
                                                 }
                                               },
-                                              icon: const Icon(
+                                              icon: Icon(
                                                 Icons.delivery_dining_rounded,
                                                 size: 16,
                                               ),
-                                              label: const Text(
+                                              label: Text(
                                                 'قبول وتعيين المندوب',
                                               ),
                                               style: ElevatedButton.styleFrom(
@@ -10740,11 +10617,11 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                       ),
                                     );
                                   },
-                                  icon: const Icon(
+                                  icon: Icon(
                                     Icons.delivery_dining_rounded,
                                     size: 16,
                                   ),
-                                  label: const Text(
+                                  label: Text(
                                     '✅ قبول + تعيين مندوب',
                                     style: TextStyle(fontSize: 11),
                                   ),
@@ -10780,7 +10657,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                   ),
-                                  child: const Text(
+                                  child: Text(
                                     '❌ رفض',
                                     style: TextStyle(fontSize: 12),
                                   ),
@@ -10804,7 +10681,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                             ),
                             child: Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.delivery_dining_rounded,
                                   color: Colors.amber,
                                   size: 14,
@@ -10813,7 +10690,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     '🧑‍🍳 جاري التحضير — المندوب: ${data['driverName'] ?? '---'} (${data['driverPhone'] ?? ''})',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: Colors.amber,
                                       fontSize: 10.5,
                                     ),
@@ -10885,7 +10762,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Row(
+                  Row(
                     children: [
                       Icon(
                         Icons.bar_chart_rounded,
@@ -10898,7 +10775,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: context.dynamicWhite,
                         ),
                       ),
                     ],
@@ -10914,7 +10791,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                     ),
                     child: Text(
                       'تقييم ${restaurant.rating} ⭐',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                         color: Colors.amber,
@@ -10997,7 +10874,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(fontSize: 10.5, color: Colors.white54),
+                  style: TextStyle(fontSize: 10.5, color: Colors.white70),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -11007,7 +10884,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.bold,
               color: Colors.white,
@@ -11032,7 +10909,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           padding: const EdgeInsets.only(right: 4, bottom: 8),
           child: Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13.5,
               color: Colors.amber,
@@ -11043,7 +10920,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           decoration: BoxDecoration(
             color: const Color(0xFF1E293B),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.05)),
+            border: Border.all(color: context.dynamicWhite.withOpacity(0.05)),
           ),
           child: ListView.separated(
             shrinkWrap: true,
@@ -11069,10 +10946,10 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                 ),
                 title: Text(
                   prod.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                   ),
                 ),
                 subtitle: Text(
@@ -11089,7 +10966,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.edit_rounded,
                         color: Colors.blueAccent,
                         size: 22,
@@ -11105,7 +10982,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.delete_rounded,
                         color: Colors.redAccent,
                         size: 22,
@@ -11122,7 +10999,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                         backgroundColor: prod.isAvailable
                             ? Colors.green
                             : Colors.red,
-                        foregroundColor: Colors.white,
+                        foregroundColor: context.dynamicWhite,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
                           vertical: 4,
@@ -11131,7 +11008,7 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                       ),
                       child: Text(
                         prod.isAvailable ? 'متوفر' : 'خلصانة',
-                        style: const TextStyle(fontSize: 10),
+                        style: TextStyle(fontSize: 10),
                       ),
                     ),
                   ],
@@ -11154,25 +11031,25 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Text(
+          title: Text(
             'تسجيل الخروج',
-            style: TextStyle(color: Colors.white),
+            style: TextStyle(color: context.dynamicWhite),
           ),
-          content: const Text(
+          content: Text(
             'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
-            style: TextStyle(color: Colors.white54),
+            style: TextStyle(color: context.dynamicWhite70),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+              child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
             ),
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
                 controller.logout();
               },
-              child: const Text(
+              child: Text(
                 'نعم، تسجيل خروج',
                 style: TextStyle(color: Colors.red),
               ),
@@ -11193,16 +11070,16 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
     builder: (ctx) => Directionality(
       textDirection: TextDirection.rtl,
       child: AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: Color(0xFF1E293B),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
             Icon(Icons.vpn_key_rounded, color: Colors.amber, size: 24),
             SizedBox(width: 8),
             Text(
               'بوابة المطاعم والمندوبين 🛵',
               style: TextStyle(
-                color: Colors.white,
+                color: context.dynamicWhite,
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
               ),
@@ -11212,22 +11089,22 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'سجّل دخولك لمتابعة مطعمك أو استلام طلباتك كمندوب توصيل:',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              style: TextStyle(color: context.dynamicWhite70, fontSize: 12),
             ),
             const SizedBox(height: 14),
             TextField(
               controller: phoneCtrl,
               keyboardType: TextInputType.phone,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: context.dynamicWhite, fontSize: 13),
               decoration: InputDecoration(
                 labelText: 'رقم الهاتف',
-                labelStyle: const TextStyle(
-                  color: Colors.white54,
+                labelStyle: TextStyle(
+                  color: context.dynamicWhite70,
                   fontSize: 12,
                 ),
-                prefixIcon: const Icon(
+                prefixIcon: Icon(
                   Icons.phone_outlined,
                   color: Colors.amber,
                   size: 20,
@@ -11236,21 +11113,21 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.05),
+                fillColor: context.dynamicWhite.withOpacity(0.05),
               ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: passCtrl,
               obscureText: true,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: context.dynamicWhite, fontSize: 13),
               decoration: InputDecoration(
                 labelText: 'كلمة السر',
-                labelStyle: const TextStyle(
-                  color: Colors.white54,
+                labelStyle: TextStyle(
+                  color: context.dynamicWhite70,
                   fontSize: 12,
                 ),
-                prefixIcon: const Icon(
+                prefixIcon: Icon(
                   Icons.lock_outline,
                   color: Colors.amber,
                   size: 20,
@@ -11259,7 +11136,7 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.05),
+                fillColor: context.dynamicWhite.withOpacity(0.05),
               ),
             ),
           ],
@@ -11267,7 +11144,7 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+            child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -11291,9 +11168,9 @@ void _showOwnerLoginModal(BuildContext context, JeebliController controller) {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF8F00),
-              foregroundColor: Colors.white,
+              foregroundColor: context.dynamicWhite,
             ),
-            child: const Text('دخول اللوحة 🚀'),
+            child: Text('دخول اللوحة 🚀'),
           ),
         ],
       ),
@@ -11337,12 +11214,12 @@ void _showOwnerEditRestaurantDialog(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            title: const Text(
+            title: Text(
               'تعديل بيانات المطعم ✏️',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: context.dynamicWhite,
               ),
             ),
             content: SingleChildScrollView(
@@ -11391,7 +11268,7 @@ void _showOwnerEditRestaurantDialog(
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(color: Colors.amber),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.add_a_photo_rounded,
                             color: Colors.amber,
                             size: 20,
@@ -11402,10 +11279,10 @@ void _showOwnerEditRestaurantDialog(
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'ساعات وقواعد العمل 🕒',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: context.dynamicWhite,
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
                     ),
@@ -11417,7 +11294,7 @@ void _showOwnerEditRestaurantDialog(
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
+                      color: context.dynamicWhite.withOpacity(0.05),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.white12),
                     ),
@@ -11458,21 +11335,21 @@ void _showOwnerEditRestaurantDialog(
                                 child: DropdownButtonFormField<int>(
                                   value: selectedOpenHour,
                                   dropdownColor: const Color(0xFF334155),
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: context.dynamicWhite,
                                     fontSize: 11,
                                   ),
                                   decoration: InputDecoration(
                                     labelText: 'يفتح من الساعة',
-                                    labelStyle: const TextStyle(
-                                      color: Colors.white54,
+                                    labelStyle: TextStyle(
+                                      color: context.dynamicWhite70,
                                       fontSize: 10,
                                     ),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     filled: true,
-                                    fillColor: Colors.white.withOpacity(0.05),
+                                    fillColor: context.dynamicWhite.withOpacity(0.05),
                                   ),
                                   items: List.generate(24, (i) {
                                     final period = i >= 12 ? 'م' : 'ص';
@@ -11494,21 +11371,21 @@ void _showOwnerEditRestaurantDialog(
                                       ? 24
                                       : selectedCloseHour,
                                   dropdownColor: const Color(0xFF334155),
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: context.dynamicWhite,
                                     fontSize: 11,
                                   ),
                                   decoration: InputDecoration(
                                     labelText: 'يغلق الساعة',
-                                    labelStyle: const TextStyle(
-                                      color: Colors.white54,
+                                    labelStyle: TextStyle(
+                                      color: context.dynamicWhite70,
                                       fontSize: 10,
                                     ),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     filled: true,
-                                    fillColor: Colors.white.withOpacity(0.05),
+                                    fillColor: context.dynamicWhite.withOpacity(0.05),
                                   ),
                                   items: List.generate(25, (i) {
                                     if (i == 24)
@@ -11541,7 +11418,7 @@ void _showOwnerEditRestaurantDialog(
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text(
+                child: Text(
                   'إلغاء',
                   style: TextStyle(color: Colors.grey),
                 ),
@@ -11573,9 +11450,9 @@ void _showOwnerEditRestaurantDialog(
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFFF8F00),
-                  foregroundColor: Colors.white,
+                  foregroundColor: context.dynamicWhite,
                 ),
-                child: const Text('حفظ التعديلات'),
+                child: Text('حفظ التعديلات'),
               ),
             ],
           ),
@@ -11637,10 +11514,10 @@ void _showOwnerProductDialog(
             ),
             title: Text(
               isEdit ? 'تعديل الوجبة ✏️' : 'إضافة وجبة جديدة 🍔',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: context.dynamicWhite,
               ),
             ),
             content: SingleChildScrollView(
@@ -11680,7 +11557,7 @@ void _showOwnerProductDialog(
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(color: Colors.amber),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.add_a_photo_rounded,
                             color: Colors.amber,
                             size: 20,
@@ -11728,16 +11605,16 @@ void _showOwnerProductDialog(
                   DropdownButtonFormField<String>(
                     value: selectedCategory,
                     dropdownColor: const Color(0xFF334155),
-                    style: const TextStyle(color: Colors.white),
+                    style: TextStyle(color: context.dynamicWhite),
                     decoration: InputDecoration(
                       labelText: 'القسم',
-                      labelStyle: const TextStyle(color: Colors.white54),
+                      labelStyle: TextStyle(color: context.dynamicWhite70),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: const BorderSide(color: Colors.white24),
                       ),
                       filled: true,
-                      fillColor: Colors.white.withOpacity(0.05),
+                      fillColor: context.dynamicWhite.withOpacity(0.05),
                     ),
                     items: const [
                       DropdownMenuItem(value: 'burger', child: Text('برجر')),
@@ -11763,7 +11640,7 @@ void _showOwnerProductDialog(
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text(
+                child: Text(
                   'إلغاء',
                   style: TextStyle(color: Colors.grey),
                 ),
@@ -11807,7 +11684,7 @@ void _showOwnerProductDialog(
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFFF8F00),
-                  foregroundColor: Colors.white,
+                  foregroundColor: context.dynamicWhite,
                 ),
                 child: Text(isEdit ? 'حفظ التعديلات' : 'إضافة الآن'),
               ),
@@ -11829,10 +11706,10 @@ Widget _darkInput(
     controller: c,
     keyboardType: type,
     onChanged: onChanged,
-    style: const TextStyle(color: Colors.white, fontSize: 13),
+    style: TextStyle(color: Colors.white, fontSize: 13),
     decoration: InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+      labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: Colors.white24),
@@ -11863,18 +11740,18 @@ void _showOwnerDeleteDialog(
       child: AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
+        title: Text(
           'تأكيد الحذف 🗑️',
           style: TextStyle(color: Colors.redAccent),
         ),
         content: Text(
           'هل أنت متأكد من حذف وجبة "${product.name}" نهائياً؟',
-          style: const TextStyle(color: Colors.white70),
+          style: TextStyle(color: context.dynamicWhite70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+            child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -11883,9 +11760,9 @@ void _showOwnerDeleteDialog(
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              foregroundColor: context.dynamicWhite,
             ),
-            child: const Text('نعم، احذف الوجبة'),
+            child: Text('نعم، احذف الوجبة'),
           ),
         ],
       ),
@@ -11979,10 +11856,10 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   child: Center(
                     child: Text(
                       name.isNotEmpty ? name[0] : '؟',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 38,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: context.dynamicWhite,
                       ),
                     ),
                   ),
@@ -12004,7 +11881,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: Colors.green.withOpacity(0.3)),
               ),
-              child: const Text(
+              child: Text(
                 '🟢 حساب زبون نشط',
                 style: TextStyle(
                   color: Colors.green,
@@ -12125,7 +12002,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
             const SizedBox(height: 24),
             Text(
               'جيبلي ديلفري — نسخة 2.0.0',
-              style: TextStyle(color: Colors.white38, fontSize: 10.5),
+              style: TextStyle(color: context.dynamicWhite70, fontSize: 10.5),
             ),
             const SizedBox(height: 8),
           ],
@@ -12172,14 +12049,14 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                       color: const Color(0xFFFF8F00).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.stars_rounded,
                       color: Color(0xFFFF8F00),
                       size: 22,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  const Column(
+                  SizedBox(width: 10),
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
@@ -12187,12 +12064,12 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: context.dynamicWhite,
                         ),
                       ),
                       Text(
                         'كل 1,000 د.ع طلب = 10 نقاط',
-                        style: TextStyle(fontSize: 10.5, color: Colors.white54),
+                        style: TextStyle(fontSize: 10.5, color: context.dynamicWhite70),
                       ),
                     ],
                   ),
@@ -12211,10 +12088,10 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                 ),
                 child: Text(
                   '$pts نقطة',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w900,
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                   ),
                 ),
               ),
@@ -12240,9 +12117,9 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   ),
                   Text(
                     '$pointsInCurrentTier / ${JeebliController.pointsPerReward}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10.5,
-                      color: Colors.white54,
+                      color: context.dynamicWhite70,
                     ),
                   ),
                 ],
@@ -12253,7 +12130,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                 child: LinearProgressIndicator(
                   value: canRedeem ? 1.0 : progress,
                   minHeight: 8,
-                  backgroundColor: Colors.white.withOpacity(0.08),
+                  backgroundColor: context.dynamicWhite.withOpacity(0.08),
                   valueColor: AlwaysStoppedAnimation(
                     canRedeem
                         ? const Color(0xFF10B981)
@@ -12268,12 +12145,12 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
               padding: EdgeInsets.symmetric(vertical: 12),
               child: Divider(height: 1, color: Colors.white12),
             ),
-            const Text(
+            Text(
               'سجل النقاط والمكافآت 📜',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Colors.white70,
+                color: context.dynamicWhite70,
               ),
             ),
             const SizedBox(height: 8),
@@ -12288,9 +12165,9 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                         Expanded(
                           child: Text(
                             entry.reason,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: Colors.white60,
+                              color: context.dynamicWhite70,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -12364,7 +12241,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
             color: const Color(0xFFFF8F00).withOpacity(0.1),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.person_outline_rounded,
             color: Color(0xFFFF8F00),
             size: 18,
@@ -12377,15 +12254,15 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   controller: _nameController,
                   keyboardType: TextInputType.name,
                   autofocus: true,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                   ),
                   decoration: InputDecoration(
                     hintText: 'اسمك الكريم',
                     isDense: true,
-                    hintStyle: const TextStyle(color: Colors.white38),
+                    hintStyle: TextStyle(color: context.dynamicWhite70),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: Colors.white24),
@@ -12399,22 +12276,22 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                       vertical: 8,
                     ),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.05),
+                    fillColor: context.dynamicWhite.withOpacity(0.05),
                   ),
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'الاسم الشخصي',
-                      style: TextStyle(fontSize: 11, color: Colors.white54),
+                      style: TextStyle(fontSize: 11, color: context.dynamicWhite70),
                     ),
                     Text(
                       name.isNotEmpty ? name : 'لم يُدخل',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: context.dynamicWhite,
                       ),
                     ),
                   ],
@@ -12457,7 +12334,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
             color: const Color(0xFFFF8F00).withOpacity(0.1),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.phone_android_rounded,
             color: Color(0xFFFF8F00),
             size: 18,
@@ -12470,15 +12347,15 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
                   autofocus: true,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: context.dynamicWhite,
                   ),
                   decoration: InputDecoration(
                     hintText: '07XXXXXXXXX',
                     isDense: true,
-                    hintStyle: const TextStyle(color: Colors.white38),
+                    hintStyle: TextStyle(color: context.dynamicWhite70),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: Colors.white24),
@@ -12492,22 +12369,22 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                       vertical: 8,
                     ),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.05),
+                    fillColor: context.dynamicWhite.withOpacity(0.05),
                   ),
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'رقم الهاتف',
-                      style: TextStyle(fontSize: 11, color: Colors.white54),
+                      style: TextStyle(fontSize: 11, color: context.dynamicWhite70),
                     ),
                     Text(
                       phone.isNotEmpty ? phone : 'لم يُدخل',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: context.dynamicWhite,
                       ),
                     ),
                   ],
@@ -12563,13 +12440,13 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: isDestructive ? Colors.redAccent : Colors.white,
+          color: isDestructive ? Colors.redAccent : context.dynamicWhite,
         ),
       ),
       trailing: Icon(
         Icons.arrow_forward_ios_rounded,
         size: 14,
-        color: isDestructive ? Colors.redAccent : Colors.white38,
+        color: isDestructive ? Colors.redAccent : context.dynamicWhite70,
       ),
     );
   }
@@ -12584,18 +12461,18 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Text(
+          title: Text(
             'تسجيل الخروج',
-            style: TextStyle(color: Colors.white),
+            style: TextStyle(color: context.dynamicWhite),
           ),
-          content: const Text(
+          content: Text(
             'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
-            style: TextStyle(color: Colors.white54),
+            style: TextStyle(color: context.dynamicWhite70),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+              child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
               onPressed: () {
@@ -12604,9 +12481,9 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                foregroundColor: context.dynamicWhite,
               ),
-              child: const Text('نعم، خروج'),
+              child: Text('نعم، خروج'),
             ),
           ],
         ),
@@ -12640,7 +12517,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
               ),
               const SizedBox(height: 16),
               ListTile(
-                leading: const Icon(
+                leading: Icon(
                   Icons.photo_library_rounded,
                   color: Color(0xFFFF8F00),
                 ),
@@ -12660,7 +12537,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(
+                leading: Icon(
                   Icons.camera_alt_rounded,
                   color: Color(0xFFFF8F00),
                 ),
@@ -12687,7 +12564,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                   labelText: 'أو أدخل رابط الصورة المباشر (URL)',
                   labelStyle: TextStyle(color: controller.subtextColor),
                   suffixIcon: IconButton(
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.check_circle_rounded,
                       color: Colors.green,
                     ),
@@ -12799,28 +12676,28 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.fastfood_rounded,
-                        color: Colors.white,
+                        color: context.dynamicWhite,
                         size: 56,
                       ),
                     ),
                     const SizedBox(height: 24),
-                    const Text(
+                    Text(
                       'جيب لي ديلفري 🍔',
                       style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.w900,
-                        color: Colors.white,
+                        color: context.dynamicWhite,
                         letterSpacing: 1.2,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'منصتك الأولى لتوصيل أشهى وجبات المطاعم بضغطة زر 🚀',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Colors.white70,
+                        color: context.dynamicWhite70,
                         fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.center,
@@ -12833,7 +12710,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         color: const Color(0xFF1E293B).withOpacity(0.8),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.05),
+                          color: context.dynamicWhite.withOpacity(0.05),
                         ),
                       ),
                       child: Row(
@@ -12938,15 +12815,15 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           child: _isLoading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
+                              ? CircularProgressIndicator(
+                                  color: context.dynamicWhite,
                                 )
-                              : const Text(
+                              : Text(
                                   'تسجيل الدخول',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
-                                    color: Colors.white,
+                                    color: context.dynamicWhite,
                                     letterSpacing: 1.0,
                                   ),
                                 ),
@@ -12954,27 +12831,27 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ] else ...[
                       // ---- واجهة الزبائن (إدخال الاسم والهاتف مباشرة) ----
-                      const Icon(
+                      Icon(
                         Icons.person_rounded,
                         size: 64,
                         color: Color(0xFFFF8F00),
                       ),
                       const SizedBox(height: 16),
-                      const Text(
+                      Text(
                         'أدخل معلوماتك',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: Colors.white,
+                          color: context.dynamicWhite,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'أدخل اسمك ورقم هاتفك لكي يتمكن المندوب من التواصل معك عند توصيل طلبك.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: Colors.white54,
+                          color: context.dynamicWhite70,
                           fontSize: 13,
                           height: 1.5,
                         ),
@@ -12983,11 +12860,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       // حقل الاسم
                       TextField(
                         controller: _guestNameController,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: context.dynamicWhite),
                         decoration: InputDecoration(
                           labelText: 'الاسم الكريم',
-                          labelStyle: const TextStyle(color: Colors.white54),
-                          prefixIcon: const Icon(
+                          labelStyle: TextStyle(color: context.dynamicWhite70),
+                          prefixIcon: Icon(
                             Icons.person_outline_rounded,
                             color: Color(0xFFFF8F00),
                           ),
@@ -13004,11 +12881,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextField(
                         controller: _guestPhoneController,
                         keyboardType: TextInputType.phone,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: context.dynamicWhite),
                         decoration: InputDecoration(
                           labelText: 'رقم الهاتف',
-                          labelStyle: const TextStyle(color: Colors.white54),
-                          prefixIcon: const Icon(
+                          labelStyle: TextStyle(color: context.dynamicWhite70),
+                          prefixIcon: Icon(
                             Icons.phone_rounded,
                             color: Color(0xFFFF8F00),
                           ),
@@ -13048,16 +12925,16 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             );
                           },
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.save_rounded,
-                            color: Colors.white,
+                            color: context.dynamicWhite,
                           ),
-                          label: const Text(
+                          label: Text(
                             'حفظ المعلومات',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
-                              color: Colors.white,
+                              color: context.dynamicWhite,
                             ),
                           ),
                           style: ElevatedButton.styleFrom(
@@ -13099,16 +12976,16 @@ class _LoginScreenState extends State<LoginScreen> {
             offset: const Offset(0, 6),
           ),
         ],
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: context.dynamicWhite.withOpacity(0.05)),
       ),
       child: TextFormField(
         controller: controller,
-        style: const TextStyle(color: Colors.white),
+        style: TextStyle(color: context.dynamicWhite),
         keyboardType: keyboardType,
         textDirection: TextDirection.rtl,
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
+          labelStyle: TextStyle(color: context.dynamicWhite.withOpacity(0.6)),
           prefixIcon: Icon(icon, color: Colors.amber),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(
@@ -13134,16 +13011,16 @@ class _LoginScreenState extends State<LoginScreen> {
             offset: const Offset(0, 6),
           ),
         ],
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: context.dynamicWhite.withOpacity(0.05)),
       ),
       child: TextFormField(
         controller: _phoneController,
         obscureText: _obscurePassword,
-        style: const TextStyle(color: Colors.white),
+        style: TextStyle(color: context.dynamicWhite),
         decoration: InputDecoration(
           labelText: 'الرمز السري',
-          labelStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
-          prefixIcon: const Icon(
+          labelStyle: TextStyle(color: context.dynamicWhite.withOpacity(0.6)),
+          prefixIcon: Icon(
             Icons.lock_outline_rounded,
             color: Colors.amber,
           ),
@@ -13152,7 +13029,7 @@ class _LoginScreenState extends State<LoginScreen> {
               _obscurePassword
                   ? Icons.visibility_off_outlined
                   : Icons.visibility_outlined,
-              color: Colors.white54,
+              color: context.dynamicWhite70,
             ),
             onPressed: () =>
                 setState(() => _obscurePassword = !_obscurePassword),
@@ -13206,7 +13083,7 @@ class _LoginScreenState extends State<LoginScreen> {
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13,
-              color: isSel ? Colors.white : Colors.white54,
+              color: isSel ? context.dynamicWhite : context.dynamicWhite70,
             ),
           ),
         ),
@@ -13258,12 +13135,12 @@ void showImagePickerOptions(
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'اختر طريقة إضافة الصورة 📸',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: context.dynamicWhite,
                 ),
               ),
               const SizedBox(height: 20),
@@ -13272,11 +13149,11 @@ void showImagePickerOptions(
                   icon: Icons.camera_alt_rounded,
                   color: Colors.orangeAccent,
                 ),
-                title: const Text(
+                title: Text(
                   'التقاط بواسطة الكاميرا 📷',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(color: context.dynamicWhite, fontSize: 14),
                 ),
-                subtitle: const Text(
+                subtitle: Text(
                   'افتح الكاميرا والتقط صورة مباشرة',
                   style: TextStyle(color: Colors.grey, fontSize: 11),
                 ),
@@ -13306,11 +13183,11 @@ void showImagePickerOptions(
                   icon: Icons.photo_library_rounded,
                   color: Colors.amber,
                 ),
-                title: const Text(
+                title: Text(
                   'اختيار من معرض الصور 🖼️',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(color: context.dynamicWhite, fontSize: 14),
                 ),
-                subtitle: const Text(
+                subtitle: Text(
                   'اختر صورة مخزنة في هاتفك',
                   style: TextStyle(color: Colors.grey, fontSize: 11),
                 ),
@@ -13340,11 +13217,11 @@ void showImagePickerOptions(
                   icon: Icons.link_rounded,
                   color: Colors.lightBlueAccent,
                 ),
-                title: const Text(
+                title: Text(
                   'إدخال رابط صورة (URL) 🌐',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(color: context.dynamicWhite, fontSize: 14),
                 ),
-                subtitle: const Text(
+                subtitle: Text(
                   'الصق رابط صورة مباشر من الإنترنت',
                   style: TextStyle(color: Colors.grey, fontSize: 11),
                 ),
@@ -13391,28 +13268,28 @@ void _showUrlInputDialog(
       child: AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
+        title: Text(
           'إدخال رابط صورة 🌐',
-          style: TextStyle(color: Colors.white, fontSize: 15),
+          style: TextStyle(color: context.dynamicWhite, fontSize: 15),
         ),
         content: TextField(
           controller: controller,
-          style: const TextStyle(color: Colors.white, fontSize: 13),
+          style: TextStyle(color: context.dynamicWhite, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'https://example.com/image.jpg',
-            hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
+            hintStyle: TextStyle(color: Colors.grey, fontSize: 12),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.05),
+            fillColor: context.dynamicWhite.withOpacity(0.05),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: context.dynamicWhite.withOpacity(0.1)),
             ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+            child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -13426,7 +13303,7 @@ void _showUrlInputDialog(
               backgroundColor: Colors.amber,
               foregroundColor: Colors.black,
             ),
-            child: const Text(
+            child: Text(
               'حفظ الصورة',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
@@ -13454,24 +13331,24 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'اختر مصدر الصورة 📸',
               style: TextStyle(
-                color: Colors.white,
+                color: context.dynamicWhite,
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
             ),
             const SizedBox(height: 16),
             ListTile(
-              leading: const Icon(
+              leading: Icon(
                 Icons.photo_library_rounded,
                 color: Colors.amber,
                 size: 28,
               ),
-              title: const Text(
+              title: Text(
                 'اختيار من المعرض (الاستوديو) 🖼️',
-                style: TextStyle(color: Colors.white, fontSize: 14),
+                style: TextStyle(color: context.dynamicWhite, fontSize: 14),
               ),
               onTap: () async {
                 final file = await picker.pickImage(
@@ -13488,14 +13365,14 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
             ),
             const Divider(color: Colors.white12),
             ListTile(
-              leading: const Icon(
+              leading: Icon(
                 Icons.camera_alt_rounded,
                 color: Colors.greenAccent,
                 size: 28,
               ),
-              title: const Text(
+              title: Text(
                 'التقاط مباشرة بواسطة الكاميرا 📸',
-                style: TextStyle(color: Colors.white, fontSize: 14),
+                style: TextStyle(color: context.dynamicWhite, fontSize: 14),
               ),
               onTap: () async {
                 final file = await picker.pickImage(
@@ -13512,14 +13389,14 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
             ),
             const Divider(color: Colors.white12),
             ListTile(
-              leading: const Icon(
+              leading: Icon(
                 Icons.link_rounded,
                 color: Colors.lightBlueAccent,
                 size: 28,
               ),
-              title: const Text(
+              title: Text(
                 'إدخال رابط URL من الإنترنت 🌐',
-                style: TextStyle(color: Colors.white, fontSize: 14),
+                style: TextStyle(color: context.dynamicWhite, fontSize: 14),
               ),
               onTap: () {
                 Navigator.pop(ctx);
@@ -13583,7 +13460,7 @@ class CustomAppImage extends StatelessWidget {
       width: width,
       height: height,
       color: const Color(0xFF0F172A),
-      child: const Icon(
+      child: Icon(
         Icons.fastfood_rounded,
         color: Colors.white24,
         size: 40,
@@ -13614,22 +13491,22 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Text(
+          title: Text(
             'تأكيد الحذف',
-            style: TextStyle(color: Colors.white),
+            style: TextStyle(color: context.dynamicWhite),
           ),
-          content: const Text(
+          content: Text(
             'هل أنت متأكد من حذف هذا المندوب نهائياً؟\n\n(لن يتمكن من تسجيل الدخول بعد الآن)',
-            style: TextStyle(color: Colors.white70),
+            style: TextStyle(color: context.dynamicWhite70),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+              child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text(
+              child: Text(
                 'حذف',
                 style: TextStyle(color: Colors.redAccent),
               ),
@@ -13686,7 +13563,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              title: const Text(
+              title: Text(
                 'تعديل بيانات المندوب',
                 style: TextStyle(color: Colors.lightBlueAccent),
               ),
@@ -13695,10 +13572,10 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                 children: [
                   TextField(
                     controller: nameCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
+                    style: TextStyle(color: context.dynamicWhite),
+                    decoration: InputDecoration(
                       labelText: 'اسم المندوب',
-                      labelStyle: TextStyle(color: Colors.white54),
+                      labelStyle: TextStyle(color: context.dynamicWhite70),
                       enabledBorder: UnderlineInputBorder(
                         borderSide: BorderSide(color: Colors.white24),
                       ),
@@ -13710,10 +13587,10 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                   const SizedBox(height: 10),
                   TextField(
                     controller: passCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
+                    style: TextStyle(color: context.dynamicWhite),
+                    decoration: InputDecoration(
                       labelText: 'كلمة المرور',
-                      labelStyle: TextStyle(color: Colors.white54),
+                      labelStyle: TextStyle(color: context.dynamicWhite70),
                       enabledBorder: UnderlineInputBorder(
                         borderSide: BorderSide(color: Colors.white24),
                       ),
@@ -13723,9 +13600,9 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
+                  Text(
                     'ملاحظة: لا يمكن تغيير رقم هاتف المندوب، احذفه وأضفه من جديد برقم آخر إذا أردت.',
-                    style: TextStyle(color: Colors.white38, fontSize: 10),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 10),
                   ),
                 ],
               ),
@@ -13733,7 +13610,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                 if (!isSaving)
                   TextButton(
                     onPressed: () => Navigator.pop(ctx),
-                    child: const Text(
+                    child: Text(
                       'إلغاء',
                       style: TextStyle(color: Colors.grey),
                     ),
@@ -13769,7 +13646,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                             strokeWidth: 2,
                           ),
                         )
-                      : const Text('حفظ'),
+                      : Text('حفظ'),
                 ),
               ],
             ),
@@ -13785,9 +13662,9 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E293B),
-        title: const Text(
+        title: Text(
           'إدارة المندوبين',
-          style: TextStyle(color: Colors.white, fontSize: 16),
+          style: TextStyle(color: context.dynamicWhite, fontSize: 16),
         ),
         leading: const JeebliBackButton(),
       ),
@@ -13804,7 +13681,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
             );
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -13816,12 +13693,12 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                   SizedBox(height: 16),
                   Text(
                     'لا يوجد مندوبين مسجلين لهذا المطعم',
-                    style: TextStyle(color: Colors.white54, fontSize: 16),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 16),
                   ),
                   SizedBox(height: 8),
                   Text(
                     'يمكنك تعيين المندوبين أثناء قبول الطلبات الجديدة.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                    style: TextStyle(color: context.dynamicWhite70, fontSize: 12),
                   ),
                 ],
               ),
@@ -13844,7 +13721,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E293B),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  border: Border.all(color: context.dynamicWhite.withOpacity(0.1)),
                 ),
                 child: Row(
                   children: [
@@ -13854,7 +13731,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                         color: Colors.lightBlueAccent.withOpacity(0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.person_outline_rounded,
                         color: Colors.lightBlueAccent,
                         size: 24,
@@ -13867,8 +13744,8 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                         children: [
                           Text(
                             name,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: context.dynamicWhite,
                               fontWeight: FontWeight.bold,
                               fontSize: 15,
                             ),
@@ -13876,16 +13753,16 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                           const SizedBox(height: 4),
                           Text(
                             '📞 $phone',
-                            style: const TextStyle(
-                              color: Colors.white70,
+                            style: TextStyle(
+                              color: context.dynamicWhite70,
                               fontSize: 13,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             '🔑 $password',
-                            style: const TextStyle(
-                              color: Colors.white54,
+                            style: TextStyle(
+                              color: context.dynamicWhite70,
                               fontSize: 11,
                             ),
                           ),
@@ -13896,7 +13773,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                       children: [
                         IconButton(
                           onPressed: () => _editDriver(data, docs[index].id),
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.edit_rounded,
                             color: Colors.amber,
                             size: 20,
@@ -13905,7 +13782,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                         ),
                         IconButton(
                           onPressed: () => _deleteDriver(docs[index].id),
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.delete_outline_rounded,
                             color: Colors.redAccent,
                             size: 20,
