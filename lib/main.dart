@@ -13316,9 +13316,8 @@ void _showUrlInputDialog(
 
 Future<String?> _showImagePickerChoice(BuildContext context) async {
   final picker = ImagePicker();
-  String? resultUrl;
 
-  await showModalBottomSheet(
+  final result = await showModalBottomSheet<String>(
     context: context,
     backgroundColor: const Color(0xFF1E293B),
     shape: const RoundedRectangleBorder(
@@ -13358,9 +13357,10 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
                 );
                 if (file != null) {
                   final bytes = await file.readAsBytes();
-                  resultUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                  if (ctx.mounted) Navigator.pop(ctx, 'data:image/jpeg;base64,${base64Encode(bytes)}');
+                } else {
+                  if (ctx.mounted) Navigator.pop(ctx, null);
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
               },
             ),
             const Divider(color: Colors.white12),
@@ -13382,9 +13382,10 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
                 );
                 if (file != null) {
                   final bytes = await file.readAsBytes();
-                  resultUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                  if (ctx.mounted) Navigator.pop(ctx, 'data:image/jpeg;base64,${base64Encode(bytes)}');
+                } else {
+                  if (ctx.mounted) Navigator.pop(ctx, null);
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
               },
             ),
             const Divider(color: Colors.white12),
@@ -13399,10 +13400,7 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
                 style: TextStyle(color: context.dynamicWhite, fontSize: 14),
               ),
               onTap: () {
-                Navigator.pop(ctx);
-                _showUrlInputDialog(context, (url) {
-                  resultUrl = url;
-                });
+                Navigator.pop(ctx, 'USE_URL');
               },
             ),
           ],
@@ -13411,7 +13409,63 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
     ),
   );
 
-  return resultUrl;
+  if (result == 'USE_URL') {
+    return await _showUrlInputDialogAsync(context);
+  }
+
+  return result;
+}
+
+Future<String?> _showUrlInputDialogAsync(BuildContext context) async {
+  final controller = TextEditingController();
+  return await showDialog<String>(
+    context: context,
+    builder: (ctx) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'إدخال رابط صورة 🌐',
+          style: TextStyle(color: context.dynamicWhite, fontSize: 15),
+        ),
+        content: TextField(
+          controller: controller,
+          style: TextStyle(color: context.dynamicWhite, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'https://example.com/image.jpg',
+            hintStyle: TextStyle(color: Colors.grey, fontSize: 12),
+            filled: true,
+            fillColor: context.dynamicWhite.withOpacity(0.05),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: context.dynamicWhite.withOpacity(0.1)),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              Navigator.pop(ctx, text.isNotEmpty ? text : null);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber,
+              foregroundColor: Colors.black,
+            ),
+            child: Text(
+              'حفظ الصورة',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class CustomAppImage extends StatelessWidget {
