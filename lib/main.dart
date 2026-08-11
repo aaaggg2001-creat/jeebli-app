@@ -1386,9 +1386,9 @@ class JeebliController extends ChangeNotifier {
       // ✅ حفظ الإشعار في سجل الإشعارات الدائم لصاحب المطعم حتى يراه عند فتح التطبيق
       if (ownerDeviceUid.isNotEmpty) {
         FirebaseFirestore.instance
-            .collection('notification_history')
+            .collection('users')
             .doc(ownerDeviceUid)
-            .collection('items')
+            .collection('notifications')
             .add({
               'message': '🛒 $body',
               'isWarning': false,
@@ -1435,9 +1435,9 @@ class JeebliController extends ChangeNotifier {
 
       // ✅ حفظ الإشعار في سجل الإشعارات الدائم للزبون (يظهر في نافذة الإشعارات)
       FirebaseFirestore.instance
-          .collection('notification_history')
+          .collection('users')
           .doc(custDeviceUid)
-          .collection('items')
+          .collection('notifications')
           .add({
             'message': '$title\n$body',
             'isWarning': false,
@@ -1493,9 +1493,9 @@ class JeebliController extends ChangeNotifier {
 
         // ✅ دائماً احفظ الإشعار في سجل المندوب الدائم
         FirebaseFirestore.instance
-            .collection('notification_history')
+            .collection('users')
             .doc(driverDeviceUid)
-            .collection('items')
+            .collection('notifications')
             .add({
               'message': '$title\n$body',
               'isWarning': false,
@@ -3584,9 +3584,9 @@ class CustomerNotificationsScreen extends StatelessWidget {
 
   Future<void> _clearAllFirestoreNotifications(String deviceUid) async {
     final coll = FirebaseFirestore.instance
-        .collection('notification_history')
+        .collection('users')
         .doc(deviceUid)
-        .collection('items');
+        .collection('notifications');
     final snap = await coll.get();
     for (final doc in snap.docs) {
       await doc.reference.delete();
@@ -3639,9 +3639,9 @@ class CustomerNotificationsScreen extends StatelessWidget {
           ? _buildEmpty(controller)
           : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('notification_history')
+                  .collection('users')
                   .doc(deviceUid)
-                  .collection('items')
+                  .collection('notifications')
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
@@ -6116,6 +6116,18 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   });
                                   // 🛑 أوقف إرسال الموقع
                                   _stopLocationTracking();
+                                  
+                                  // 🔔 إشعار للزبون - تم التوصيل
+                                  final od = (await docRef.get()).data() as Map<String, dynamic>? ?? {};
+                                  if (context.mounted) {
+                                    JeebliProvider.of(context)._notifyCustomer(
+                                      custDeviceUid: od['deviceUid']?.toString() ?? '',
+                                      title: '🎉 طلبك وصل!',
+                                      body: 'تم تسليم طلبك بنجاح، بالهناء والشفاء! 🍔',
+                                      orderId: docRef.id,
+                                    );
+                                  }
+
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
@@ -10766,9 +10778,20 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: OutlinedButton(
-                                  onPressed: () => docs[index].reference.update(
-                                    {'status': 'rejected'},
-                                  ),
+                                  onPressed: () async {
+                                    await docs[index].reference.update({'status': 'rejected'});
+                                    
+                                    // 🔔 إشعار للزبون بالرفض
+                                    final od = (await docs[index].reference.get()).data() as Map<String, dynamic>? ?? {};
+                                    if (context.mounted) {
+                                      JeebliProvider.of(context)._notifyCustomer(
+                                        custDeviceUid: od['deviceUid']?.toString() ?? '',
+                                        title: '❌ عذراً، تم رفض الطلب',
+                                        body: 'نعتذر، المطعم لا يمكنه تلبية الطلب حالياً.',
+                                        orderId: docs[index].id,
+                                      );
+                                    }
+                                  },
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: Colors.redAccent,
                                     side: const BorderSide(
