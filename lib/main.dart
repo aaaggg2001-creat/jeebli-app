@@ -54,7 +54,8 @@ Future<String> sendOneSignalPushWithResponse({
       },
       body: jsonEncode({
         'app_id': _kOneSignalAppId,
-        'include_player_ids': [playerId],
+        // ✅ الطريقة الحديثة: include_subscription_ids بدلاً من include_player_ids المهمل
+        'include_subscription_ids': [playerId],
         'headings': {'en': title, 'ar': title},
         'contents': {'en': body, 'ar': body},
         'priority': 10,
