@@ -242,31 +242,29 @@ final jeebliNotifications = JeebliNotificationService();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── تسجيل Background handler قبل أي شيء ──────────────────────
-
-
   try {
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: 'AIzaSyJeebliAppKey1234567890abcdef',
-        appId: '1:100000000000:android:jeebliapp12345',
-        messagingSenderId: '100000000000',
-        projectId: 'jeebli-app',
-      ),
-    );
+    // ✅ تهيئة Firebase من google-services.json الحقيقي (بدون Options يدوية)
+    await Firebase.initializeApp();
+
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
 
-    // ── تهيئة نظام الإشعارات ──────────────────────────────────────
+    // ── تهيئة نظام الإشعارات المحلية ──────────────────────────────
     await jeebliNotifications.initialize();
 
-    // ── تهيئة OneSignal للإشعارات حتى والتطبيق مغلق ──────────────
+    // ── تهيئة OneSignal للإشعارات حتى والتطبيق مغلق ────────────────
+    // OneSignal يعتمد على FCM (google-services.json) لتوصيل إشعارات الخلفية
     OneSignal.initialize(_kOneSignalAppId);
     OneSignal.Notifications.requestPermission(true);
+
+    // ── استمع لتغيرات حالة الاشتراك وسجل التغييرات ─────────────────
+    OneSignal.User.pushSubscription.addObserver((state) {
+      debugPrint('OneSignal subscription changed: ${state.current.id}');
+    });
   } catch (e) {
-    debugPrint('Firebase init note: $e');
+    debugPrint('App init error: $e');
   }
   runApp(const MyApp());
 }
@@ -1556,15 +1554,13 @@ class JeebliController extends ChangeNotifier {
               title = '✅ تم استلام طلبك!';
               body = 'تم توصيل وجبتك بنجاح. ألف صحة وعافية ❤️';
               _stopCustomerOrderListener();
-              activeOrderId = null; // أزِل الطلب النشط بعد التسليم
-              saveSession(); // احفظ الحالة (بدون active_order_id)
+              // لا نزيل activeOrderId فوراً ليراه الزبون في شريط الحالة حتى يغلقه بنفسه
               break;
             case 'rejected':
               title = '❌ تم رفض طلبك';
               body = 'نأسف، قام المطعم برفض طلبك. يمكنك تجربة مطعم آخر.';
               _stopCustomerOrderListener();
-              activeOrderId = null; // أزِل الطلب النشط بعد الرفض
-              saveSession();
+              // لا نزيل activeOrderId فوراً ليراه الزبون
               break;
             default:
               return;
@@ -1582,6 +1578,12 @@ class JeebliController extends ChangeNotifier {
   void _stopCustomerOrderListener() {
     _activeOrderSubscription?.cancel();
     _activeOrderSubscription = null;
+  }
+
+  void clearActiveOrder() {
+    activeOrderId = null;
+    saveSession();
+    notifyListeners();
   }
 
   void _recoverActiveOrders() async {
@@ -4983,6 +4985,13 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                         ],
                       ),
                     ),
+                    if (status == 'delivered' || status == 'rejected')
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                        onPressed: () {
+                          controller.clearActiveOrder();
+                        },
+                      ),
                   ],
                 ),
               ),
