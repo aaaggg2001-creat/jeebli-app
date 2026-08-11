@@ -60,6 +60,8 @@ Future<String> sendOneSignalPushWithResponse({
         'priority': 10,
         'android_accent_color': 'FFFF8F00',
         'android_visibility': 1,
+        'existing_android_channel_id': 'jeebli_orders_channel',
+        'android_channel_id': 'jeebli_orders_channel',
         'content_available': true,
         'data': data,
       }),
@@ -92,6 +94,11 @@ Future<bool> sendOneSignalBroadcast({
         'headings': {'en': title, 'ar': title},
         'contents': {'en': body, 'ar': body},
         'priority': 10,
+        'android_accent_color': 'FFFF8F00',
+        'android_visibility': 1,
+        'existing_android_channel_id': 'jeebli_orders_channel',
+        'android_channel_id': 'jeebli_orders_channel',
+        'content_available': true,
         'data': {'screen': 'promo'},
       }),
     );
@@ -339,6 +346,7 @@ class Restaurant {
   final int closeHour; // 0-23
   double? restaurantLat; // موقع المطعم
   double? restaurantLng;
+  List<String> customCategories;
 
   DateTime? joinedAt;
 
@@ -361,6 +369,7 @@ class Restaurant {
     this.closeHour = 24,
     this.restaurantLat,
     this.restaurantLng,
+    this.customCategories = const [],
   });
 
   bool get isOpenNow {
@@ -414,6 +423,7 @@ class Restaurant {
       'closeHour': closeHour,
       'restaurantLat': restaurantLat,
       'restaurantLng': restaurantLng,
+      'customCategories': customCategories,
     };
   }
 
@@ -441,6 +451,10 @@ class Restaurant {
         restaurantLng: map['restaurantLng'] != null
             ? (map['restaurantLng'] as num).toDouble()
             : null,
+        customCategories: (map['customCategories'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            [],
       )
       ..joinedAt = map['joinedAt'] != null
           ? (map['joinedAt'] is Timestamp
@@ -529,6 +543,7 @@ class Product {
     double? price,
     double? discountPrice,
     String? imageUrl,
+    String? categoryId,
     bool? isAvailable,
     bool clearDiscount = false,
   }) {
@@ -542,7 +557,7 @@ class Product {
           ? null
           : (discountPrice ?? this.discountPrice),
       imageUrl: imageUrl ?? this.imageUrl,
-      categoryId: categoryId,
+      categoryId: categoryId ?? this.categoryId,
       isAvailable: isAvailable ?? this.isAvailable,
     );
   }
@@ -1346,31 +1361,51 @@ class JeebliController extends ChangeNotifier {
 
       // المسار الأول: ownerPlayerId محفوظ مباشرة في وثيقة المطعم
       String playerId = restDoc.data()?['ownerPlayerId'] as String? ?? '';
+      String ownerDeviceUid = restDoc.data()?['ownerDeviceUid'] as String? ?? '';
 
       // المسار الثاني: البحث عبر ownerDeviceUid → onesignal_players
-      if (playerId.isEmpty) {
-        final ownerUid = restDoc.data()?['ownerDeviceUid'] as String? ?? '';
-        if (ownerUid.isNotEmpty) {
-          final playerDoc = await FirebaseFirestore.instance
-              .collection('onesignal_players')
-              .doc(ownerUid)
-              .get();
-          playerId = playerDoc.data()?['playerId'] as String? ?? '';
-        }
+      if (playerId.isEmpty && ownerDeviceUid.isNotEmpty) {
+        final playerDoc = await FirebaseFirestore.instance
+            .collection('onesignal_players')
+            .doc(ownerDeviceUid)
+            .get();
+        playerId = playerDoc.data()?['playerId'] as String? ?? '';
       }
 
-      if (playerId.isEmpty) {
+      final title = '🔔 طلب جديد!';
+      final body = '$customerName طلب بمبلغ ${totalAmount.toStringAsFixed(0)} IQD';
+
+      if (playerId.isNotEmpty) {
+        final result = await sendOneSignalPushWithResponse(
+          playerId: playerId,
+          title: title,
+          body: body,
+          data: {'orderId': orderId, 'screen': 'orders'},
+        );
+        debugPrint('Notify owner result: $result');
+      } else {
         debugPrint('Owner playerId not found for: $restaurantId');
-        return;
       }
 
-      final result = await sendOneSignalPushWithResponse(
-        playerId: playerId,
-        title: 'طلب جديد! / New Order!',
-        body: '$customerName - ${totalAmount.toStringAsFixed(0)} IQD',
-        data: {'orderId': orderId, 'screen': 'orders'},
-      );
-      debugPrint('Notify owner result: $result');
+      // ✅ حفظ الإشعار في سجل الإشعارات الدائم لصاحب المطعم حتى يراه عند فتح التطبيق
+      if (ownerDeviceUid.isNotEmpty) {
+        FirebaseFirestore.instance
+            .collection('notification_history')
+            .doc(ownerDeviceUid)
+            .collection('items')
+            .add({
+              'message': '🛒 $body',
+              'isWarning': false,
+              'isOwnerNotification': true,
+              'isRead': false,
+              'createdAt': FieldValue.serverTimestamp(),
+              'orderId': orderId,
+            })
+            .catchError((e) {
+              debugPrint('Owner notif save error: $e');
+              throw e;
+            });
+      }
     } catch (e) {
       debugPrint('Notify owner error: $e');
     }
@@ -1386,33 +1421,39 @@ class JeebliController extends ChangeNotifier {
   }) async {
     try {
       if (custDeviceUid.isEmpty) return;
+
+      // إرسال إشعار Push عبر OneSignal (يصل حتى عند إغلاق التطبيق)
       final playerDoc = await FirebaseFirestore.instance
           .collection('onesignal_players')
           .doc(custDeviceUid)
           .get();
       final playerId = playerDoc.data()?['playerId'] ?? '';
-      await sendOneSignalPush(
-        playerId: playerId,
-        title: title,
-        body: body,
-        data: {'orderId': orderId, 'screen': 'track'},
-      );
-      // حفظ الإشعار في سجل الإشعارات الدائم للزبون
-      if (custDeviceUid.isNotEmpty) {
-        FirebaseFirestore.instance
-            .collection('notification_history')
-            .doc(custDeviceUid)
-            .collection('items')
-            .add({
-              'title': title,
-              'body': body,
-              'type': 'order',
-              'isRead': false,
-              'createdAt': FieldValue.serverTimestamp(),
-            })
-            .then((_) {})
-            .catchError((_) {});
+      if (playerId.isNotEmpty) {
+        await sendOneSignalPush(
+          playerId: playerId,
+          title: title,
+          body: body,
+          data: {'orderId': orderId, 'screen': 'track'},
+        );
       }
+
+      // ✅ حفظ الإشعار في سجل الإشعارات الدائم للزبون (يظهر في نافذة الإشعارات)
+      FirebaseFirestore.instance
+          .collection('notification_history')
+          .doc(custDeviceUid)
+          .collection('items')
+          .add({
+            'message': '$title\n$body',
+            'isWarning': false,
+            'isOwnerNotification': false,
+            'isRead': false,
+            'createdAt': FieldValue.serverTimestamp(),
+            'orderId': orderId,
+          })
+          .catchError((e) {
+            debugPrint('Customer notif save error: $e');
+            throw e;
+          });
     } catch (e) {
       debugPrint('Notify customer error: $e');
     }
@@ -1443,28 +1484,34 @@ class JeebliController extends ChangeNotifier {
             .doc(driverDeviceUid)
             .get();
         final playerId = playerDoc.data()?['playerId'] ?? '';
-        if (playerId.isEmpty) continue;
 
-        await sendOneSignalPush(
-          playerId: playerId,
-          title: title,
-          body: body,
-          data: {'orderId': orderId, 'screen': 'driver_dashboard'},
-        );
-        // حفظ إشعار المندوب في سجله الدائم
+        // إرسال Push إذا كان لديه playerId
+        if (playerId.isNotEmpty) {
+          await sendOneSignalPush(
+            playerId: playerId,
+            title: title,
+            body: body,
+            data: {'orderId': orderId, 'screen': 'driver_dashboard'},
+          );
+        }
+
+        // ✅ دائماً احفظ الإشعار في سجل المندوب الدائم
         FirebaseFirestore.instance
             .collection('notification_history')
             .doc(driverDeviceUid)
             .collection('items')
             .add({
-              'title': title,
-              'body': body,
-              'type': 'driver_order',
+              'message': '$title\n$body',
+              'isWarning': false,
+              'isOwnerNotification': false,
               'isRead': false,
               'createdAt': FieldValue.serverTimestamp(),
+              'orderId': orderId,
             })
-            .then((_) {})
-            .catchError((_) {});
+            .catchError((e) {
+              debugPrint('Driver notif save error: $e');
+              throw e;
+            });
       }
       debugPrint('✅ Notified all drivers for restaurant: $restaurantId');
     } catch (e) {
@@ -2137,6 +2184,7 @@ class JeebliController extends ChangeNotifier {
     double? price,
     double? discountPrice,
     String? imageUrl,
+    String? categoryId,
     bool? isAvailable,
     bool clearDiscount = false,
   }) {
@@ -3591,8 +3639,9 @@ class CustomerNotificationsScreen extends StatelessWidget {
           ? _buildEmpty(controller)
           : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('orders')
-                  .where('deviceUid', isEqualTo: deviceUid)
+                  .collection('notification_history')
+                  .doc(deviceUid)
+                  .collection('items')
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
@@ -3621,20 +3670,9 @@ class CustomerNotificationsScreen extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final doc = firestoreDocs[index];
                       final data = doc.data() as Map<String, dynamic>;
-                      final status = data['status'] as String? ?? '';
-                      String message = '';
-                      bool isWarning = false;
                       
-                      if (status == 'pending') message = 'طلبك قيد المراجعة بانتظار موافقة المطعم.';
-                      else if (status == 'accepted') message = 'تم قبول طلبك وجاري تجهيزه الآن!';
-                      else if (status == 'onTheWay') message = 'المندوب في طريقه إليك 🛵!';
-                      else if (status == 'delivered') message = 'تم تسليم الطلب بنجاح، بالعافية 😋';
-                      else if (status == 'rejected') {
-                        message = 'نعتذر، تم رفض الطلب من قبل المطعم.';
-                        isWarning = true;
-                      } else {
-                        message = 'حالة الطلب: $status';
-                      }
+                      final message = data['message'] as String? ?? '';
+                      final isWarning = data['isWarning'] as bool? ?? false;
                       
                       final ts = data['createdAt'] as Timestamp?;
                       final time = ts?.toDate() ?? DateTime.now();
@@ -6157,15 +6195,28 @@ class RestaurantMenuScreen extends StatefulWidget {
 }
 
 class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
-  final List<Category> categories = [
-    Category(id: 'all', name: 'الكل', icon: Icons.grid_view_rounded),
-    Category(id: 'favs', name: 'المفضلة ❤️', icon: Icons.favorite_rounded),
-    Category(id: 'burger', name: 'برجر', icon: Icons.lunch_dining),
-    Category(id: 'zinger', name: 'زنجر', icon: Icons.restaurant),
-    Category(id: 'pizza', name: 'بيتزا', icon: Icons.local_pizza),
-    Category(id: 'shawarma', name: 'شاورما', icon: Icons.flatware),
-    Category(id: 'fries', name: 'فنجر', icon: Icons.fastfood),
-  ];
+  List<Category> _buildCategories(JeebliController ctrl) {
+    final rest = ctrl.activeRestaurant;
+    final List<Category> cats = [
+      Category(id: 'all', name: 'الكل', icon: Icons.grid_view_rounded),
+      Category(id: 'favs', name: 'المفضلة ❤️', icon: Icons.favorite_rounded),
+    ];
+    if (rest != null && rest.customCategories.isNotEmpty) {
+      for (var c in rest.customCategories) {
+        cats.add(Category(id: c, name: c, icon: Icons.fastfood));
+      }
+    } else {
+      // Fallback
+      cats.addAll([
+        Category(id: 'burger', name: 'برجر', icon: Icons.lunch_dining),
+        Category(id: 'zinger', name: 'زنجر', icon: Icons.restaurant),
+        Category(id: 'pizza', name: 'بيتزا', icon: Icons.local_pizza),
+        Category(id: 'shawarma', name: 'شاورما', icon: Icons.flatware),
+        Category(id: 'fries', name: 'فنجر', icon: Icons.fastfood),
+      ]);
+    }
+    return cats;
+  }
 
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -6206,7 +6257,10 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                   .where((p) => controller.isProductFavorite(p.id))
                   .toList()
             : liveProducts
-                  .where((p) => p.categoryId == controller.selectedCategoryId)
+                  .where((p) => p.categoryId == controller.selectedCategoryId || 
+                         // دعم التوافقية القديمة
+                         (p.categoryId == 'burger' && controller.selectedCategoryId == 'برجر') ||
+                         (p.categoryId == 'pizza' && controller.selectedCategoryId == 'بيتزا'))
                   .toList();
 
         final filtered = _searchQuery.isEmpty
@@ -6393,9 +6447,9 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 14),
-                    itemCount: categories.length,
+                    itemCount: _buildCategories(controller).length,
                     itemBuilder: (context, i) {
-                      final cat = categories[i];
+                      final cat = _buildCategories(controller)[i];
                       final isSel = controller.selectedCategoryId == cat.id;
                       return Padding(
                         padding: const EdgeInsets.only(left: 8),
@@ -11550,19 +11604,19 @@ void _showOwnerProductDialog(
         : '',
   );
 
-  final allowedCategories = [
-    'burger',
-    'zinger',
-    'shawarma',
-    'pizza',
-    'fries',
-    'drinks',
-    'other',
-  ];
-  String selectedCategory = product?.categoryId ?? 'burger';
-  if (!allowedCategories.contains(selectedCategory)) {
-    selectedCategory = 'burger';
+  final rest = ctrl.activeRestaurant;
+  List<String> allowedCategories = rest?.customCategories.isNotEmpty == true 
+      ? rest!.customCategories 
+      : ['برجر', 'بيتزا', 'شاورما', 'مشروبات', 'أخرى'];
+      
+  String selectedCategory = product?.categoryId ?? allowedCategories.first;
+  if (!allowedCategories.contains(selectedCategory) && product != null && product.categoryId.isNotEmpty) {
+    allowedCategories.add(product.categoryId);
+    selectedCategory = product.categoryId;
   }
+  
+  final newCategoryController = TextEditingController();
+
 
   showDialog(
     context: context,
@@ -11665,37 +11719,68 @@ void _showOwnerProductDialog(
                     ],
                   ),
                   const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: selectedCategory,
-                    dropdownColor: const Color(0xFF334155),
-                    style: TextStyle(color: context.dynamicWhite),
-                    decoration: InputDecoration(
-                      labelText: 'القسم',
-                      labelStyle: TextStyle(color: context.dynamicWhite70),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.white24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: allowedCategories.contains(selectedCategory) ? selectedCategory : allowedCategories.first,
+                          dropdownColor: const Color(0xFF334155),
+                          style: TextStyle(color: context.dynamicWhite),
+                          decoration: InputDecoration(
+                            labelText: 'القسم',
+                            labelStyle: TextStyle(color: context.dynamicWhite70),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(color: Colors.white24),
+                            ),
+                            filled: true,
+                            fillColor: context.dynamicWhite.withOpacity(0.05),
+                          ),
+                          items: allowedCategories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() => selectedCategory = val);
+                            }
+                          },
+                        ),
                       ),
-                      filled: true,
-                      fillColor: context.dynamicWhite.withOpacity(0.05),
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'burger', child: Text('برجر')),
-                      DropdownMenuItem(value: 'zinger', child: Text('زنجر')),
-                      DropdownMenuItem(
-                        value: 'shawarma',
-                        child: Text('شاورما'),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle, color: Color(0xFFFF8F00), size: 30),
+                        tooltip: 'إضافة قسم جديد',
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (ctx2) => AlertDialog(
+                              backgroundColor: const Color(0xFF1E293B),
+                              title: Text('قسم جديد', style: TextStyle(color: Colors.white)),
+                              content: TextField(
+                                controller: newCategoryController,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: const InputDecoration(
+                                  hintText: 'اسم القسم (مثال: عصائر)',
+                                  hintStyle: TextStyle(color: Colors.white54),
+                                ),
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx2), child: Text('إلغاء')),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    if (newCategoryController.text.trim().isNotEmpty) {
+                                      setState(() {
+                                        allowedCategories.add(newCategoryController.text.trim());
+                                        selectedCategory = newCategoryController.text.trim();
+                                      });
+                                    }
+                                    Navigator.pop(ctx2);
+                                  },
+                                  child: Text('إضافة'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                      DropdownMenuItem(value: 'pizza', child: Text('بيتزا')),
-                      DropdownMenuItem(value: 'fries', child: Text('فنجر')),
-                      DropdownMenuItem(value: 'drinks', child: Text('مشروبات')),
-                      DropdownMenuItem(value: 'other', child: Text('أخرى')),
                     ],
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() => selectedCategory = val);
-                      }
-                    },
                   ),
                 ],
               ),
