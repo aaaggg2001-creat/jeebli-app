@@ -246,14 +246,9 @@ void main() async {
 
 
   try {
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: 'AIzaSyJeebliAppKey1234567890abcdef',
-        appId: '1:100000000000:android:jeebliapp12345',
-        messagingSenderId: '100000000000',
-        projectId: 'jeebli-app',
-      ),
-    );
+    // الاعتماد بالكامل على google-services.json بعد تفعيل البلوجن
+    await Firebase.initializeApp();
+
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
