@@ -47,8 +47,6 @@ Future<void> sendOneSignalPush({
         'headings': {'en': title, 'ar': title},
         'contents': {'en': body, 'ar': body},
         'priority': 10,
-        'android_channel_id': 'jeebli_orders_channel',
-        'android_sound': 'notification',
         'android_accent_color': 'FFFF8F00',
         'android_visibility': 1,
         'content_available': true,
@@ -79,7 +77,6 @@ Future<bool> sendOneSignalBroadcast({
         'headings': {'en': title, 'ar': title},
         'contents': {'en': body, 'ar': body},
         'priority': 10,
-        'android_channel_id': 'jeebli_orders_channel',
         'data': {'screen': 'promo'},
       }),
     );
@@ -839,15 +836,25 @@ class JeebliController extends ChangeNotifier {
   /// حفظ OneSignal Player ID في Firestore
   Future<void> _saveOneSignalPlayerId(String uid) async {
     try {
+      await Future.delayed(const Duration(seconds: 2)); // Wait for OneSignal to init
       final playerId = OneSignal.User.pushSubscription.id;
       if (playerId == null || playerId.isEmpty) return;
-      await FirebaseFirestore.instance
-          .collection('onesignal_players')
-          .doc(uid)
-          .set({
-            'playerId': playerId,
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+      
+      final db = FirebaseFirestore.instance;
+      // حفظ للمستخدم العادي (زبون/مندوب)
+      await db.collection('onesignal_players').doc(uid).set({
+        'playerId': playerId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      
+      // إذا كان مدير مطعم، احفظ اللاعب أيضاً تحت معرّف المطعم لكي تصله الطلبات
+      if (_userRole == 'owner' && _userRestaurantId != null && _userRestaurantId!.isNotEmpty) {
+        await db.collection('onesignal_players').doc(_userRestaurantId!).set({
+          'playerId': playerId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      
       debugPrint('✅ OneSignal Player ID saved: $playerId');
     } catch (e) {
       debugPrint('OneSignal save error: $e');
@@ -3536,9 +3543,8 @@ class CustomerNotificationsScreen extends StatelessWidget {
           ? _buildEmpty(controller)
           : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('notification_history')
-                  .doc(deviceUid)
-                  .collection('items')
+                  .collection('orders')
+                  .where('deviceUid', isEqualTo: deviceUid)
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
@@ -3567,37 +3573,29 @@ class CustomerNotificationsScreen extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final doc = firestoreDocs[index];
                       final data = doc.data() as Map<String, dynamic>;
-                      final title = data['title'] as String? ?? '';
-                      final body = data['body'] as String? ?? '';
-                      final messageStr = data['message'] as String? ?? '';
-                      final message = messageStr.isNotEmpty ? messageStr : (title.isNotEmpty ? '$title\n$body' : body);
-                      final type = data['type'] as String? ?? 'order';
-                      final isWarning = type == 'warning';
+                      final status = data['status'] as String? ?? '';
+                      String message = '';
+                      bool isWarning = false;
+                      
+                      if (status == 'pending') message = 'طلبك قيد المراجعة بانتظار موافقة المطعم.';
+                      else if (status == 'accepted') message = 'تم قبول طلبك وجاري تجهيزه الآن!';
+                      else if (status == 'onTheWay') message = 'المندوب في طريقه إليك 🛵!';
+                      else if (status == 'delivered') message = 'تم تسليم الطلب بنجاح، بالعافية 😋';
+                      else if (status == 'rejected') {
+                        message = 'نعتذر، تم رفض الطلب من قبل المطعم.';
+                        isWarning = true;
+                      } else {
+                        message = 'حالة الطلب: $status';
+                      }
+                      
                       final ts = data['createdAt'] as Timestamp?;
                       final time = ts?.toDate() ?? DateTime.now();
-                      return Dismissible(
-                        key: Key(doc.id),
-                        direction: DismissDirection.endToStart,
-                        background: Container(
-                          alignment: Alignment.centerLeft,
-                          padding: const EdgeInsets.only(left: 20),
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Icon(
-                            Icons.delete_outline_rounded,
-                            color: Colors.redAccent,
-                          ),
-                        ),
-                        onDismissed: (_) => doc.reference.delete(),
-                        child: _buildNotifTile(
-                          controller,
-                          message,
-                          isWarning,
-                          time,
-                          docRef: doc.reference,
-                        ),
+                      
+                      return _buildNotifTile(
+                        controller,
+                        message,
+                        isWarning,
+                        time,
                       );
                     },
                   );
@@ -4313,8 +4311,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                             const SizedBox(width: 4),
                                             Text(
                                               rest.location,
-                                              style: TextStyle(
-                                                color: context.dynamicWhite,
+                                              style: const TextStyle(
+                                                color: Colors.white,
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.bold,
                                               ),
@@ -4366,8 +4364,8 @@ class _HomeRestaurantsScreenState extends State<HomeRestaurantsScreen> {
                                                       : '${d.toStringAsFixed(1)} كم';
                                                   return Text(
                                                     'يبعد $str',
-                                                    style: TextStyle(
-                                                      color: context.dynamicWhite,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
                                                       fontSize: 10.5,
                                                       fontWeight:
                                                           FontWeight.bold,
