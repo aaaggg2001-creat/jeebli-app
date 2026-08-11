@@ -33,9 +33,20 @@ Future<void> sendOneSignalPush({
   required String body,
   Map<String, String> data = const {},
 }) async {
-  if (playerId.isEmpty) return;
+  await sendOneSignalPushWithResponse(
+      playerId: playerId, title: title, body: body, data: data);
+}
+
+/// إرسال Push Notification مع إرجاع نص الاستجابة للتشخيص
+Future<String> sendOneSignalPushWithResponse({
+  required String playerId,
+  required String title,
+  required String body,
+  Map<String, String> data = const {},
+}) async {
+  if (playerId.isEmpty) return 'empty_player_id';
   try {
-    await http.post(
+    final response = await http.post(
       Uri.parse('https://onesignal.com/api/v1/notifications'),
       headers: {
         'Content-Type': 'application/json',
@@ -53,11 +64,15 @@ Future<void> sendOneSignalPush({
         'data': data,
       }),
     );
-    debugPrint('✅ OneSignal Push sent to: $playerId');
+    debugPrint(
+        'OneSignal [${response.statusCode}]: ${response.body}');
+    return response.body;
   } catch (e) {
-    debugPrint('❌ OneSignal error: $e');
+    debugPrint('OneSignal error: $e');
+    return 'error: $e';
   }
 }
+
 
 /// ─── إرسال إشعار ترويجي لجميع مستخدمي التطبيق ────────────────────────────
 Future<bool> sendOneSignalBroadcast({
@@ -833,33 +848,43 @@ class JeebliController extends ChangeNotifier {
     }
   }
 
-  /// حفظ OneSignal Player ID في Firestore
+  /// حفظ OneSignal Player ID في Firestore مع retry تلقائي
   Future<void> _saveOneSignalPlayerId(String uid) async {
-    try {
-      await Future.delayed(const Duration(seconds: 2)); // Wait for OneSignal to init
-      final playerId = OneSignal.User.pushSubscription.id;
-      if (playerId == null || playerId.isEmpty) return;
-      
-      final db = FirebaseFirestore.instance;
-      // حفظ للمستخدم العادي (زبون/مندوب)
-      await db.collection('onesignal_players').doc(uid).set({
-        'playerId': playerId,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      
-      // إذا كان مدير مطعم، احفظ اللاعب أيضاً تحت معرّف المطعم لكي تصله الطلبات
-      if (_userRole == 'owner' && _userRestaurantId != null && _userRestaurantId!.isNotEmpty) {
-        await db.collection('onesignal_players').doc(_userRestaurantId!).set({
+    if (uid.isEmpty) return;
+    for (int attempt = 0; attempt < 6; attempt++) {
+      try {
+        // انتظر قليلاً لكي يكتمل تهيئة OneSignal SDK
+        await Future.delayed(Duration(seconds: attempt == 0 ? 3 : 5));
+        final playerId = OneSignal.User.pushSubscription.id;
+        if (playerId == null || playerId.isEmpty) {
+          debugPrint('OneSignal not ready (attempt ${attempt + 1}/6)');
+          continue;
+        }
+        final db = FirebaseFirestore.instance;
+        // حفظ تحت معرّف الجهاز (لجميع الأدوار)
+        await db.collection('onesignal_players').doc(uid).set({
           'playerId': playerId,
+          'role': _userRole ?? 'customer',
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+        // إذا كان مالك مطعم: احفظ أيضاً في وثيقة المطعم مباشرةً
+        if (_userRole == 'owner' &&
+            _userRestaurantId != null &&
+            _userRestaurantId!.isNotEmpty) {
+          await db.collection('restaurants').doc(_userRestaurantId!).set({
+            'ownerDeviceUid': uid,
+            'ownerPlayerId': playerId,
+          }, SetOptions(merge: true));
+          debugPrint('Owner PlayerId saved in restaurant doc: $playerId');
+        }
+        debugPrint('OneSignal Player ID saved OK: $playerId');
+        return; // نجح
+      } catch (e) {
+        debugPrint('OneSignal save attempt ${attempt + 1} error: $e');
       }
-      
-      debugPrint('✅ OneSignal Player ID saved: $playerId');
-    } catch (e) {
-      debugPrint('OneSignal save error: $e');
     }
   }
+
 
   void saveSession() async {
     try {
@@ -1313,29 +1338,44 @@ class JeebliController extends ChangeNotifier {
   }) async {
     try {
       if (restaurantId.isEmpty) return;
-      // جلب Player ID لصاحب المطعم من Firestore
       final restDoc = await FirebaseFirestore.instance
           .collection('restaurants')
           .doc(restaurantId)
           .get();
       if (!restDoc.exists) return;
-      final ownerUid = restDoc.data()?['ownerDeviceUid'] ?? '';
-      if (ownerUid.isEmpty) return;
-      final playerDoc = await FirebaseFirestore.instance
-          .collection('onesignal_players')
-          .doc(ownerUid)
-          .get();
-      final playerId = playerDoc.data()?['playerId'] ?? '';
-      await sendOneSignalPush(
+
+      // المسار الأول: ownerPlayerId محفوظ مباشرة في وثيقة المطعم
+      String playerId = restDoc.data()?['ownerPlayerId'] as String? ?? '';
+
+      // المسار الثاني: البحث عبر ownerDeviceUid → onesignal_players
+      if (playerId.isEmpty) {
+        final ownerUid = restDoc.data()?['ownerDeviceUid'] as String? ?? '';
+        if (ownerUid.isNotEmpty) {
+          final playerDoc = await FirebaseFirestore.instance
+              .collection('onesignal_players')
+              .doc(ownerUid)
+              .get();
+          playerId = playerDoc.data()?['playerId'] as String? ?? '';
+        }
+      }
+
+      if (playerId.isEmpty) {
+        debugPrint('Owner playerId not found for: $restaurantId');
+        return;
+      }
+
+      final result = await sendOneSignalPushWithResponse(
         playerId: playerId,
-        title: '🔔 طلب جديد وارد!',
-        body: '$customerName | ${totalAmount.toStringAsFixed(0)} د.ع',
+        title: 'طلب جديد! / New Order!',
+        body: '$customerName - ${totalAmount.toStringAsFixed(0)} IQD',
         data: {'orderId': orderId, 'screen': 'orders'},
       );
+      debugPrint('Notify owner result: $result');
     } catch (e) {
       debugPrint('Notify owner error: $e');
     }
   }
+
 
   /// ═══ إرسال إشعار OneSignal للزبون عند تغيير حالة طلبه ═══
   Future<void> _notifyCustomer({
@@ -1975,6 +2015,14 @@ class JeebliController extends ChangeNotifier {
           }
           _isLoggedIn = true;
           saveSession();
+          // save owner device UID in restaurant doc for push notifications
+          if (deviceUid.isNotEmpty && _userRestaurantId != null && _userRestaurantId!.isNotEmpty) {
+            FirebaseFirestore.instance
+                .collection('restaurants')
+                .doc(_userRestaurantId!)
+                .set({'ownerDeviceUid': deviceUid}, SetOptions(merge: true));
+            _saveOneSignalPlayerId(deviceUid);
+          }
           notifyListeners();
           return true;
         } else if (_userRole == 'driver') {
