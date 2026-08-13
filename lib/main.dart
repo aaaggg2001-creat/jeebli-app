@@ -831,7 +831,6 @@ class JeebliController extends ChangeNotifier {
       streetDetails = '';
       _cartItems.clear();
       pastOrders.clear();
-      notifications.clear();
       activeOrderId = null;
       deviceUid = ''; // It will be recreated on next load
       _isLoggedIn = false;
@@ -861,10 +860,7 @@ class JeebliController extends ChangeNotifier {
           .map((o) => jsonEncode(o.toMap()))
           .toList();
       await prefs.setStringList('local_past_orders', pastOrdersJson);
-      final notificationsJson = notifications
-          .map((n) => jsonEncode(n.toMap()))
-          .toList();
-      await prefs.setStringList('local_notifications', notificationsJson);
+
     } catch (e) {
       debugPrint('Local save note: $e');
     }
@@ -914,10 +910,8 @@ class JeebliController extends ChangeNotifier {
       final notificationsJson =
           prefs.getStringList('local_notifications') ?? [];
       if (notificationsJson.isNotEmpty) {
-        notifications.clear();
         for (var j in notificationsJson) {
           final map = jsonDecode(j) as Map<String, dynamic>;
-          notifications.add(AppNotification.fromMap(map));
         }
       }
       notifyListeners();
@@ -2199,13 +2193,7 @@ class JeebliController extends ChangeNotifier {
     bool isWarning = false,
     bool isOwnerNotification = false,
   }) {
-    final notif = AppNotification(
-      message: message,
-      time: DateTime.now(),
-      isWarning: isWarning,
-      isOwnerNotification: isOwnerNotification,
-    );
-    notifications.insert(0, notif);
+
     _saveLocalData();
     // ── حفظ الإشعار في Firestore (دائم وغير قابل للضياع) ─────────
     if (deviceUid.isNotEmpty) {
@@ -3311,16 +3299,9 @@ class MainNavigationShell extends StatelessWidget {
               label: 'السلة',
             ),
             NavigationDestination(
-              icon: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(
-                    Icons.notifications_outlined,
-                    color: controller.subtextColor,
-                  ),
-                  
-                    ),
-                ],
+              icon: Icon(
+                Icons.notifications_outlined,
+                color: controller.subtextColor,
               ),
               selectedIcon: Icon(
                 Icons.notifications,
@@ -3385,7 +3366,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () async {
-              controller.clearNotifications();
+              
               if (deviceUid.isNotEmpty) {
                 await _clearAllFirestoreNotifications(deviceUid);
               }
@@ -3409,16 +3390,16 @@ class CustomerNotificationsScreen extends StatelessWidget {
               builder: (context, snapshot) {
                 // fallback to local if Firestore not connected
                 final firestoreDocs = snapshot.data?.docs ?? [];
-                final localNotifs = controller.notifications;
+                
 
                 if (snapshot.connectionState == ConnectionState.waiting &&
-                    localNotifs.isEmpty) {
+                    true) {
                   return const Center(
                     child: CircularProgressIndicator(color: Color(0xFFFF8F00)),
                   );
                 }
 
-                if (firestoreDocs.isEmpty && localNotifs.isEmpty) {
+                if (firestoreDocs.isEmpty) {
                   return _buildEmpty(controller);
                 }
 
@@ -3452,11 +3433,11 @@ class CustomerNotificationsScreen extends StatelessWidget {
                 // Fallback: local notifications
                 return ListView.separated(
                   padding: const EdgeInsets.all(16),
-                  itemCount: localNotifs.length,
+                  itemCount: [].length,
                   separatorBuilder: (context, index) =>
                       const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final notif = localNotifs[index];
+                    final notif = [][index];
                     return _buildNotifTile(
                       controller,
                       notif.message,

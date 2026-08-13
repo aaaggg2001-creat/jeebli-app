@@ -1132,7 +1132,6 @@ class _NotificationsTabState extends State<_NotificationsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final notifications = widget.controller.notifications;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -1269,70 +1268,7 @@ class _NotificationsTabState extends State<_NotificationsTab> {
           ),
         ),
         const SizedBox(height: 20),
-        // ── سجل الإشعارات السابقة ──
-        const Padding(
-          padding: EdgeInsets.only(bottom: 10),
-          child: Text('📋 سجل الإشعارات', style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold)),
-        ),
-        if (notifications.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(30),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.notifications_none_rounded, color: Colors.grey[700], size: 48),
-                const SizedBox(height: 12),
-                const Text('لا توجد إشعارات حتى الآن', style: TextStyle(color: Colors.grey, fontSize: 13)),
-              ],
-            ),
-          )
-        else
-          ...notifications.map((n) => Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: n.isWarning
-                  ? Colors.red.withOpacity(0.1)
-                  : const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: n.isWarning
-                    ? Colors.red.withOpacity(0.3)
-                    : Colors.white.withOpacity(0.05),
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  n.isWarning ? Icons.warning_amber_rounded : Icons.notifications_rounded,
-                  color: n.isWarning ? Colors.red[300] : Colors.amber,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(n.message,
-                          style: TextStyle(
-                              color: n.isWarning ? Colors.red[200] : Colors.white70,
-                              fontSize: 12.5,
-                              height: 1.4)),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${n.time.hour}:${n.time.minute.toString().padLeft(2, '0')}',
-                        style: const TextStyle(color: Colors.grey, fontSize: 10),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          )),
+
       ],
     );
   }
