@@ -10,7 +10,6 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
@@ -138,108 +137,6 @@ Future<void> openNativeMap({
 
 
 /// ─── خدمة الإشعارات المحلية والسحابية ──────────────────────────────────────
-class JeebliNotificationService {
-  static final JeebliNotificationService _instance =
-      JeebliNotificationService._internal();
-  factory JeebliNotificationService() => _instance;
-  JeebliNotificationService._internal();
-
-  final FlutterLocalNotificationsPlugin _localNotifications =
-      FlutterLocalNotificationsPlugin();
-
-  /// قناة الإشعارات لأندرويد - أعلى أولوية مع صوت ووميض
-  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
-    'jeebli_orders_channel',
-    'إشعارات الطلبات',
-    description: 'إشعارات حالة الطلبات والعروض من جيبلي',
-    importance: Importance.max,
-    playSound: true,
-    enableVibration: true,
-    showBadge: true,
-    enableLights: true,
-    ledColor: Color(0xFFFF8F00),
-  );
-
-  Future<void> initialize() async {
-
-
-    // ── تهيئة الإشعارات المحلية ───────────────────────────────────
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
-    await _localNotifications.initialize(
-      settings: initSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse res) {
-        debugPrint('تم النقر على الإشعار: ${res.payload}');
-      },
-    );
-
-    // إنشاء قناة الأندرويد
-    await _localNotifications
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.createNotificationChannel(_channel);
-
-
-  }
-
-  /// حفظ FCM Token في Firestore لإرسال الإشعارات عند إغلاق التطبيق
-
-  /// إرسال إشعار محلي يظهر فوراً مع صوت ووميض وبقاء في البردة
-  Future<void> _showLocalNotification({
-    required String title,
-    required String body,
-    String payload = '',
-    int id = 0,
-  }) async {
-    final androidDetails = AndroidNotificationDetails(
-      'jeebli_orders_channel',
-      'إشعارات الطلبات',
-      channelDescription: 'إشعارات حالة الطلبات والعروض من جيبلي',
-      importance: Importance.max,
-      priority: Priority.high,
-      icon: '@mipmap/ic_launcher',
-      playSound: true,
-      enableVibration: true,
-      autoCancel: false, // يبقى في البردة حتى يمسحه المستخدم يدوياً ✅
-      ongoing: false,
-      color: const Color(0xFFFF8F00),
-      ledColor: const Color(0xFFFF8F00),
-      ledOnMs: 1000,
-      ledOffMs: 500,
-      enableLights: true,
-      fullScreenIntent: true, // يوقظ الشاشة إن كانت مغلقة ✅
-      ticker: title,
-      styleInformation: BigTextStyleInformation(
-        body,
-        htmlFormatBigText: false,
-        contentTitle: title,
-        htmlFormatContentTitle: false,
-      ),
-    );
-    final details = NotificationDetails(android: androidDetails);
-    await _localNotifications.show(
-      id: id,
-      title: title,
-      body: body,
-      notificationDetails: details,
-      payload: payload,
-    );
-  }
-
-  /// إشعار محلي مباشر (للاستخدام من داخل التطبيق)
-  Future<void> showOrderNotification({
-    required String title,
-    required String body,
-    int id = 1,
-  }) async {
-    await _showLocalNotification(title: title, body: body, id: id);
-  }
-}
-
-/// ─── Instance عالمي للخدمة ──────────────────────────────────────────────────
-final jeebliNotifications = JeebliNotificationService();
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -256,7 +153,6 @@ void main() async {
     );
 
     // ── تهيئة نظام الإشعارات ──────────────────────────────────────
-    await jeebliNotifications.initialize();
 
     // ── تهيئة OneSignal للإشعارات حتى والتطبيق مغلق ──────────────
     OneSignal.initialize(_kOneSignalAppId);
@@ -839,14 +735,12 @@ class JeebliController extends ChangeNotifier {
       if (savedOrderId != null && savedOrderId.isNotEmpty) {
         activeOrderId = savedOrderId;
       }
-      unreadNotifications = prefs.getInt('unread_notifications') ?? 0;
 
       // بمجرد تحميل المعرف، نجلب الطلبات النشطة للاستماع لها فوراً
       _recoverActiveOrders();
 
       // ── حفظ FCM Token + OneSignal Player ID في Firestore ────────────────
       if (deviceUid.isNotEmpty) {
-//         jeebliNotifications.saveFcmTokenToFirestore(deviceUid);
         // حفظ OneSignal Player ID لإرسال الإشعارات حتى والتطبيق مغلق
         _saveOneSignalPlayerId(deviceUid);
       }
@@ -919,7 +813,6 @@ class JeebliController extends ChangeNotifier {
       } else {
         await prefs.remove('active_order_id');
       }
-      await prefs.setInt('unread_notifications', unreadNotifications);
     } catch (e) {
       debugPrint('Session save note: $e');
     }
@@ -939,7 +832,6 @@ class JeebliController extends ChangeNotifier {
       _cartItems.clear();
       pastOrders.clear();
       notifications.clear();
-      unreadNotifications = 0;
       activeOrderId = null;
       deviceUid = ''; // It will be recreated on next load
       _isLoggedIn = false;
@@ -1113,11 +1005,7 @@ class JeebliController extends ChangeNotifier {
               _addNotification(
                 '🎉 عرض جديد من ${o.restaurantName}: ${o.title} - ${o.discountTag}',
               );
-              jeebliNotifications.showOrderNotification(
-                id: o.id.hashCode,
-                title: 'عرض جديد من ${o.restaurantName}!',
-                body: '${o.title} - ${o.discountTag}',
-              );
+              
             }
           }
         }
@@ -1516,67 +1404,9 @@ class JeebliController extends ChangeNotifier {
   }
 
   /// ═══ المستمع الذكي للزبون - يرصد تغيرات حالة طلبه فوراً ويرسل إشعاراً خاصاً به ═══
-  void startCustomerOrderListener(String orderId) {
-    _activeOrderSubscription?.cancel();
-    _lastKnownOrderStatus = null;
-    activeOrderId = orderId;
-    _activeOrderSubscription = FirebaseFirestore.instance
-        .collection('orders')
-        .doc(orderId)
-        .snapshots()
-        .listen((doc) {
-          if (!doc.exists) return;
-          final data = doc.data() as Map<String, dynamic>;
-          final newStatus = data['status'] as String? ?? 'pending';
-          if (newStatus == _lastKnownOrderStatus) return; // لا تحديث
-          final prevStatus = _lastKnownOrderStatus;
-          _lastKnownOrderStatus = newStatus;
-          if (prevStatus == null)
-            return; // تجاهل أول قراءة عند الفتح لمنع الإشعار المكرر
-          // ═══ إرسال الإشعار للزبون حسب الحالة الجديدة ═══
-          String title = '';
-          String body = '';
-          switch (newStatus) {
-            case 'preparing':
-              title = '👨‍🍳 قبل المطعم طلبك!';
-              body = 'مطعمك بدأ بتحضير وجبتك الآن. استعد!';
-              break;
-            case 'onTheWay':
-              final driverName = data['driverName'] ?? '';
-              title = '🛵 طلبك قادم إليك!';
-              body = driverName.isNotEmpty
-                  ? 'المندوب $driverName استلم وجبتك وهو في الطريق إليك!'
-                  : 'المندوب استلم وجبتك وهو في الطريق إليك!';
-              break;
-            case 'delivered':
-              title = '✅ تم استلام طلبك!';
-              body = 'تم توصيل وجبتك بنجاح. ألف صحة وعافية ❤️';
-              _stopCustomerOrderListener();
-              // لا نزيل activeOrderId فوراً ليراه الزبون في شريط الحالة حتى يغلقه بنفسه
-              break;
-            case 'rejected':
-              title = '❌ تم رفض طلبك';
-              body = 'نأسف، قام المطعم برفض طلبك. يمكنك تجربة مطعم آخر.';
-              _stopCustomerOrderListener();
-              // لا نزيل activeOrderId فوراً ليراه الزبون
-              break;
-            default:
-              return;
-          }
-          _addNotification('$title $body');
-          jeebliNotifications.showOrderNotification(
-            id: orderId.hashCode,
-            title: title,
-            body: body,
-          );
-          notifyListeners();
-        }, onError: (e) => debugPrint('Order listener error: $e'));
-  }
+  
 
-  void _stopCustomerOrderListener() {
-    _activeOrderSubscription?.cancel();
-    _activeOrderSubscription = null;
-  }
+  
 
   void clearActiveOrder() {
     activeOrderId = null;
@@ -1596,7 +1426,7 @@ class JeebliController extends ChangeNotifier {
         if (status == 'pending' ||
             status == 'preparing' ||
             status == 'onTheWay') {
-          startCustomerOrderListener(doc.id);
+          
           break;
         }
       }
@@ -1657,14 +1487,8 @@ class JeebliController extends ChangeNotifier {
   double get deliveryFee => _activeRestaurant?.deliveryFee ?? 1500.0;
 
   OrderStatus _orderStatus = OrderStatus.idle;
-  List<AppNotification> notifications = [];
-  int unreadNotifications = 0;
-
-  void clearNotifications() {
-    notifications.clear();
-    unreadNotifications = 0;
-    notifyListeners();
-  }
+    
+  
 
   double restaurantRating = 0;
   double driverRating = 0;
@@ -2382,7 +2206,6 @@ class JeebliController extends ChangeNotifier {
       isOwnerNotification: isOwnerNotification,
     );
     notifications.insert(0, notif);
-    unreadNotifications++;
     _saveLocalData();
     // ── حفظ الإشعار في Firestore (دائم وغير قابل للضياع) ─────────
     if (deviceUid.isNotEmpty) {
@@ -2404,11 +2227,7 @@ class JeebliController extends ChangeNotifier {
     }
   }
 
-  void markNotificationsRead() {
-    unreadNotifications = 0;
-    saveSession();
-    notifyListeners();
-  }
+  
 
   // --- Order ---
   Future<bool> confirmOrder(BuildContext context) async {
@@ -2497,7 +2316,7 @@ class JeebliController extends ChangeNotifier {
       activeOrderId = orderId; // حفظ المعرّف لمتابعة الطلب حياً
       saveSession(); // ← احفظ activeOrderId فوراً لبقاء الكارت بعد إغلاق التطبيق
       // ★ ابدأ الاستماع لتغييرات هذا الطلب وأرسل الإشعار للزبون حصراً
-      startCustomerOrderListener(orderId);
+      
 
       // 🔔 أرسل إشعار OneSignal لصاحب المطعم فوراً
       _notifyOwnerNewOrder(
@@ -2546,12 +2365,6 @@ class JeebliController extends ChangeNotifier {
     _orderStatus = OrderStatus.confirmed;
 
     // 🔔 إشعار لحظي للزبون عند تأكيد الطلب
-    jeebliNotifications.showOrderNotification(
-      title: '✅ تم إرسال طلبك بنجاح!',
-      body:
-          'طلبك من ${_activeRestaurant?.name ?? 'المطعم'} قيد المعالجة 🛵 المبلغ: ${totalAmount.toStringAsFixed(0)} د.ع',
-      id: 1001,
-    );
 
     clearCart();
     _activeRestaurant = null;
@@ -2773,37 +2586,7 @@ class JeebliController extends ChangeNotifier {
   }
 }
 
-class AppNotification {
-  final String message;
-  final DateTime time;
-  final bool isWarning;
-  final bool isOwnerNotification;
 
-  AppNotification({
-    required this.message,
-    required this.time,
-    this.isWarning = false,
-    this.isOwnerNotification = false,
-  });
-
-  Map<String, dynamic> toMap() {
-    return {
-      'message': message,
-      'time': time.toIso8601String(),
-      'isWarning': isWarning,
-      'isOwnerNotification': isOwnerNotification,
-    };
-  }
-
-  factory AppNotification.fromMap(Map<String, dynamic> map) {
-    return AppNotification(
-      message: map['message'] ?? '',
-      time: DateTime.tryParse(map['time']?.toString() ?? '') ?? DateTime.now(),
-      isWarning: map['isWarning'] ?? false,
-      isOwnerNotification: map['isOwnerNotification'] ?? false,
-    );
-  }
-}
 
 class JeebliProvider extends InheritedNotifier<JeebliController> {
   const JeebliProvider({
@@ -3535,25 +3318,7 @@ class MainNavigationShell extends StatelessWidget {
                     Icons.notifications_outlined,
                     color: controller.subtextColor,
                   ),
-                  if (controller.unreadNotifications > 0)
-                    Positioned(
-                      right: -8,
-                      top: -8,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.redAccent,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(
-                          '${controller.unreadNotifications}',
-                          style: TextStyle(
-                            color: context.dynamicWhite,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
+                  
                     ),
                 ],
               ),
@@ -3598,9 +3363,6 @@ class CustomerNotificationsScreen extends StatelessWidget {
     final controller = JeebliProvider.of(context);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (controller.unreadNotifications > 0) {
-        controller.markNotificationsRead();
-      }
     });
 
     final deviceUid = controller.deviceUid;
@@ -5356,11 +5118,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       if (mounted) {
         JeebliProvider.of(context).playOrderAlarmSound();
       }
-      jeebliNotifications.showOrderNotification(
-        id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        title: '🛵 لديك طلب توصيل جديد!',
-        body: 'وصل طلب جديد إليك $driverName — افتح التطبيق لقبوله',
-      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
