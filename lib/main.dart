@@ -16,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'super_admin_screen.dart';
 
@@ -137,6 +138,65 @@ Future<void> openNativeMap({
 
 
 /// ─── خدمة الإشعارات المحلية والسحابية ──────────────────────────────────────
+
+// ─── خدمة الإشعارات المحلية (البردة) ─────────────────────────────────────────
+class JeebliNotificationService {
+  static final JeebliNotificationService _instance = JeebliNotificationService._internal();
+  factory JeebliNotificationService() => _instance;
+  JeebliNotificationService._internal();
+
+  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+
+  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+    'jeebli_orders_channel',
+    'إشعارات جيبلي',
+    description: 'إشعارات الطلبات والتوصيل',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+    showBadge: true,
+    enableLights: true,
+    ledColor: Color(0xFFFF8F00),
+  );
+
+  Future<void> initialize() async {
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidInit);
+    await _plugin.initialize(initSettings);
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(_channel);
+  }
+
+  Future<void> show({
+    required String title,
+    required String body,
+    int id = 1,
+  }) async {
+    final androidDetails = AndroidNotificationDetails(
+      'jeebli_orders_channel',
+      'إشعارات جيبلي',
+      channelDescription: 'إشعارات الطلبات والتوصيل',
+      importance: Importance.max,
+      priority: Priority.high,
+      icon: '@mipmap/ic_launcher',
+      playSound: true,
+      enableVibration: true,
+      autoCancel: false,
+      color: const Color(0xFFFF8F00),
+      ledColor: const Color(0xFFFF8F00),
+      ledOnMs: 1000,
+      ledOffMs: 500,
+      enableLights: true,
+      fullScreenIntent: true,
+      styleInformation: BigTextStyleInformation(body, contentTitle: title),
+    );
+    await _plugin.show(id, title, body, NotificationDetails(android: androidDetails));
+  }
+}
+
+final _localNotif = JeebliNotificationService();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -156,6 +216,7 @@ void main() async {
 
     // ── تهيئة OneSignal للإشعارات حتى والتطبيق مغلق ──────────────
     OneSignal.initialize(_kOneSignalAppId);
+    await _localNotif.initialize();
     OneSignal.Notifications.requestPermission(true);
   } catch (e) {
     debugPrint('Firebase init note: $e');
@@ -1264,6 +1325,10 @@ class JeebliController extends ChangeNotifier {
       } else {
         debugPrint('Owner playerId not found for: $restaurantId');
       }
+      // ✅ إشعار محلي في البردة إذا كان صاحب المطعم فاتحاً التطبيق
+      if (ownerDeviceUid == this.deviceUid) {
+        await _localNotif.show(title: title, body: body, id: 20);
+      }
 
       // ✅ حفظ الإشعار في سجل الإشعارات الدائم لصاحب المطعم حتى يراه عند فتح التطبيق
       if (ownerDeviceUid.isNotEmpty) {
@@ -1313,6 +1378,10 @@ class JeebliController extends ChangeNotifier {
           body: body,
           data: {'orderId': orderId, 'screen': 'track'},
         );
+      }
+      // ✅ إشعار محلي في البردة للزبون إذا كان التطبيق مفتوحاً
+      if (custDeviceUid == this.deviceUid) {
+        await _localNotif.show(title: title, body: body, id: 10);
       }
 
       // ✅ حفظ الإشعار في سجل الإشعارات الدائم للزبون (يظهر في نافذة الإشعارات)
@@ -1371,6 +1440,10 @@ class JeebliController extends ChangeNotifier {
             body: body,
             data: {'orderId': orderId, 'screen': 'driver_dashboard'},
           );
+        }
+        // ✅ إشعار محلي في البردة إذا كان المندوب فاتحاً التطبيق
+        if (driverDeviceUid == this.deviceUid) {
+          await _localNotif.show(title: title, body: body, id: 30);
         }
 
         // ✅ دائماً احفظ الإشعار في سجل المندوب الدائم
@@ -2307,6 +2380,12 @@ class JeebliController extends ChangeNotifier {
       
 
       // 🔔 أرسل إشعار OneSignal لصاحب المطعم فوراً
+      // إشعار محلي للزبون نفسه بأن طلبه تم إرساله
+      _localNotif.show(
+        title: '✅ تم إرسال طلبك!',
+        body: 'طلبك قيد الانتظار وفي انتظار موافقة المطعم',
+        id: 5,
+      );
       _notifyOwnerNewOrder(
         restaurantId: cartRestaurantId ?? '',
         customerName: customerName,
