@@ -731,6 +731,7 @@ class JeebliController extends ChangeNotifier {
   bool get isSessionLoading => _isSessionLoading;
 
   StreamSubscription? _connectivitySubscription;
+  StreamSubscription<QuerySnapshot>? _firestoreNotifSubscription;
 
   JeebliController() {
     _initConnectivity();
@@ -757,6 +758,7 @@ class JeebliController extends ChangeNotifier {
   @override
   void dispose() {
     _connectivitySubscription?.cancel();
+    _firestoreNotifSubscription?.cancel();
     _deliveryTimer?.cancel();
     super.dispose();
   }
@@ -811,6 +813,8 @@ class JeebliController extends ChangeNotifier {
             _saveOneSignalPlayerIdDirect(deviceUid, currentId);
           }
         });
+        // بدء مستمع الإشعارات العالمي
+        _startGlobalNotificationListener();
       }
     } catch (e) {
       debugPrint('Session load note: $e');
@@ -881,6 +885,46 @@ class JeebliController extends ChangeNotifier {
       debugPrint('Direct OneSignal Player ID save error: $e');
     }
   }
+
+  /// مستمع الإشعارات العالمي من Firestore لعرض الإشعار في البردة عندما يكون التطبيق مفتوحاً
+  void _startGlobalNotificationListener() {
+    if (deviceUid.isEmpty || _firestoreNotifSubscription != null) return;
+
+    bool isFirstLoad = true;
+    _firestoreNotifSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(deviceUid)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((snap) async {
+      if (isFirstLoad) {
+        isFirstLoad = false;
+        return;
+      }
+      for (final change in snap.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data() as Map<String, dynamic>?;
+          if (data != null) {
+            final title = data['title'] as String? ?? '🔔 إشعار جديد';
+            final message = data['message'] as String? ?? '';
+            
+            // يعرض الإشعار بالبردة فقط عندما يكون التطبيق مفتوحاً في الواجهة (resumed)
+            // لتجنب الازدواجية مع إشعارات OneSignal في الخلفية
+            final isResumed = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+            if (isResumed) {
+              await _localNotif.show(
+                title: title,
+                body: message,
+                id: DateTime.now().millisecondsSinceEpoch % 100000,
+              );
+            }
+          }
+        }
+      }
+    });
+  }
+
 
 
   void saveSession() async {
@@ -3503,9 +3547,20 @@ class CustomerNotificationsScreen extends StatelessWidget {
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
-                // fallback to local if Firestore not connected
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Text(
+                        '⚠️ خطأ في تحميل الإشعارات:\n${snapshot.error}',
+                        style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
+
                 final firestoreDocs = snapshot.data?.docs ?? [];
-                
 
                 if (snapshot.connectionState == ConnectionState.waiting &&
                     firestoreDocs.isEmpty) {
@@ -3518,7 +3573,6 @@ class CustomerNotificationsScreen extends StatelessWidget {
                   return _buildEmpty(controller);
                 }
 
-                // Use Firestore data if available, else fall back to local
                 if (firestoreDocs.isNotEmpty) {
                   return ListView.separated(
                     padding: const EdgeInsets.all(16),
@@ -3542,6 +3596,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
                         fullMsg,
                         isWarning,
                         time,
+                        docRef: doc.reference,
                       );
                     },
                   );
@@ -5158,54 +5213,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   int _prevOrderCount = -1;
   StreamSubscription<Position>? _locationSubscription;
   String? _activeTrackingOrderId;
-  StreamSubscription<QuerySnapshot>? _notifSubscription;
-  bool _isFirstNotifLoad = true;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_notifSubscription == null) {
-      _startDriverNotifListener();
-    }
-  }
-
-  void _startDriverNotifListener() {
-    final controller = JeebliProvider.of(context);
-    final uid = controller.deviceUid;
-    if (uid.isEmpty) return;
-
-    _notifSubscription = FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('notifications')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .listen((snap) async {
-      if (_isFirstNotifLoad) {
-        _isFirstNotifLoad = false;
-        return;
-      }
-      for (final change in snap.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          final data = change.doc.data() as Map<String, dynamic>?;
-          if (data != null) {
-            final msg = data['message'] as String? ?? '';
-            final title = data['title'] as String? ?? '🔔 إشعار جديد';
-            await _localNotif.show(
-              title: title,
-              body: msg,
-              id: DateTime.now().millisecondsSinceEpoch % 100000,
-            );
-          }
-        }
-      }
-    });
-  }
 
   @override
   void dispose() {
     _locationSubscription?.cancel();
-    _notifSubscription?.cancel();
     super.dispose();
   }
 
@@ -9029,58 +9040,6 @@ class RestaurantOwnerAdminScreen extends StatefulWidget {
 }
 
 class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen> {
-  StreamSubscription<QuerySnapshot>? _notifSubscription;
-  bool _isFirstLoad = true;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_notifSubscription == null) {
-      _startNotifListener();
-    }
-  }
-
-  void _startNotifListener() {
-    final controller = JeebliProvider.of(context);
-    final uid = controller.deviceUid;
-    if (uid.isEmpty) return;
-
-    _notifSubscription = FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('notifications')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .listen((snap) async {
-      if (_isFirstLoad) {
-        _isFirstLoad = false;
-        return;
-      }
-      if (snap.docChanges.isNotEmpty) {
-        for (final change in snap.docChanges) {
-          if (change.type == DocumentChangeType.added) {
-            final data = change.doc.data() as Map<String, dynamic>?;
-            if (data != null) {
-              final msg = data['message'] as String? ?? '';
-              final title = data['title'] as String? ?? '🔔 إشعار جديد';
-              // Show local tray notification
-              await _localNotif.show(
-                title: title,
-                body: msg,
-                id: DateTime.now().millisecondsSinceEpoch % 100000,
-              );
-            }
-          }
-        }
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _notifSubscription?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
