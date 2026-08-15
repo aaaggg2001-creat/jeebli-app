@@ -63,7 +63,6 @@ Future<String> sendOneSignalPushWithResponse({
         'android_visibility': 1,
         'existing_android_channel_id': 'jeebli_alerts_v1',
         'android_channel_id': 'jeebli_alerts_v1',
-        'android_sound': 'nil', // default sound
         'content_available': true,
         'data': data,
       }),
@@ -100,7 +99,6 @@ Future<bool> sendOneSignalBroadcast({
         'android_visibility': 1,
         'existing_android_channel_id': 'jeebli_alerts_v1',
         'android_channel_id': 'jeebli_alerts_v1',
-        'android_sound': 'nil',
         'content_available': true,
         'data': {'screen': 'promo'},
       }),
