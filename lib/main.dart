@@ -61,8 +61,9 @@ Future<String> sendOneSignalPushWithResponse({
         'priority': 10,
         'android_accent_color': 'FFFF8F00',
         'android_visibility': 1,
-        'existing_android_channel_id': 'jeebli_orders_channel',
-        'android_channel_id': 'jeebli_orders_channel',
+        'existing_android_channel_id': 'jeebli_alerts_v1',
+        'android_channel_id': 'jeebli_alerts_v1',
+        'android_sound': 'nil', // default sound
         'content_available': true,
         'data': data,
       }),
@@ -97,8 +98,9 @@ Future<bool> sendOneSignalBroadcast({
         'priority': 10,
         'android_accent_color': 'FFFF8F00',
         'android_visibility': 1,
-        'existing_android_channel_id': 'jeebli_orders_channel',
-        'android_channel_id': 'jeebli_orders_channel',
+        'existing_android_channel_id': 'jeebli_alerts_v1',
+        'android_channel_id': 'jeebli_alerts_v1',
+        'android_sound': 'nil',
         'content_available': true,
         'data': {'screen': 'promo'},
       }),
@@ -148,8 +150,8 @@ class JeebliNotificationService {
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
-    'jeebli_orders_channel',
-    'إشعارات جيبلي',
+    'jeebli_alerts_v1',
+    'إشعارات جيبلي الهامة',
     description: 'إشعارات الطلبات والتوصيل',
     importance: Importance.max,
     playSound: true,
@@ -174,8 +176,8 @@ class JeebliNotificationService {
     int id = 1,
   }) async {
     final androidDetails = AndroidNotificationDetails(
-      'jeebli_orders_channel',
-      'إشعارات جيبلي',
+      'jeebli_alerts_v1',
+      'إشعارات جيبلي الهامة',
       channelDescription: 'إشعارات الطلبات والتوصيل',
       importance: Importance.max,
       priority: Priority.high,
