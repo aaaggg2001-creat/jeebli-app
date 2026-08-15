@@ -892,9 +892,9 @@ class JeebliController extends ChangeNotifier {
 
     bool isFirstLoad = true;
     _firestoreNotifSubscription = FirebaseFirestore.instance
-        .collection('users')
+        .collection('notification_history')
         .doc(deviceUid)
-        .collection('notifications')
+        .collection('items')
         .orderBy('createdAt', descending: true)
         .snapshots()
         .listen((snap) async {
@@ -1408,9 +1408,9 @@ class JeebliController extends ChangeNotifier {
       // ✅ حفظ الإشعار في سجل الإشعارات الدائم لصاحب المطعم حتى يراه عند فتح التطبيق
       if (ownerDeviceUid.isNotEmpty) {
         FirebaseFirestore.instance
-            .collection('users')
+            .collection('notification_history')
             .doc(ownerDeviceUid)
-            .collection('notifications')
+            .collection('items')
             .add({
               'title': title,
               'message': body,
@@ -1462,9 +1462,9 @@ class JeebliController extends ChangeNotifier {
 
       // ✅ حفظ الإشعار في سجل الإشعارات الدائم للزبون (يظهر في نافذة الإشعارات)
       FirebaseFirestore.instance
-          .collection('users')
+          .collection('notification_history')
           .doc(custDeviceUid)
-          .collection('notifications')
+          .collection('items')
           .add({
             'title': title,
             'message': body,
@@ -1525,9 +1525,9 @@ class JeebliController extends ChangeNotifier {
 
         // ✅ دائماً احفظ الإشعار في سجل المندوب الدائم
         FirebaseFirestore.instance
-            .collection('users')
+            .collection('notification_history')
             .doc(driverDeviceUid)
-            .collection('notifications')
+            .collection('items')
             .add({
               'title': title,
               'message': body,
@@ -2350,9 +2350,9 @@ class JeebliController extends ChangeNotifier {
     // ── حفظ الإشعار في Firestore (دائم وغير قابل للضياع) ─────────
     if (deviceUid.isNotEmpty) {
       FirebaseFirestore.instance
-          .collection('users')
+          .collection('notification_history')
           .doc(deviceUid)
-          .collection('notifications')
+          .collection('items')
           .add({
             'title': '🔔 جيبلي',
             'message': message,
@@ -3489,9 +3489,9 @@ class CustomerNotificationsScreen extends StatelessWidget {
 
   Future<void> _clearAllFirestoreNotifications(String deviceUid) async {
     final coll = FirebaseFirestore.instance
-        .collection('users')
+        .collection('notification_history')
         .doc(deviceUid)
-        .collection('notifications');
+        .collection('items');
     final snap = await coll.get();
     for (final doc in snap.docs) {
       await doc.reference.delete();
@@ -3541,23 +3541,16 @@ class CustomerNotificationsScreen extends StatelessWidget {
           ? _buildEmpty(controller)
           : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('users')
+                  .collection('notification_history')
                   .doc(deviceUid)
-                  .collection('notifications')
+                  .collection('items')
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24.0),
-                      child: Text(
-                        '⚠️ خطأ في تحميل الإشعارات:\n${snapshot.error}',
-                        style: const TextStyle(color: Colors.redAccent, fontSize: 13),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  );
+                  debugPrint('⚠️ Firestore Notif Error: ${snapshot.error}');
+                  // في حالة خطأ في قواعد Firestore، نعرض قائمة فارغة بدل رسالة الخطأ
+                  return _buildEmpty(controller);
                 }
 
                 final firestoreDocs = snapshot.data?.docs ?? [];

@@ -1,0 +1,33 @@
+﻿rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // المطاعم
+    match /restaurants/{restaurantId} {
+      allow read, write: if true;
+      match /products/{productId} { allow read, write: if true; }
+      match /categories/{catId} { allow read, write: if true; }
+    }
+
+    // الطلبات
+    match /orders/{orderId} { allow read, write: if true; }
+
+    // سجل الاشعارات
+    match /notification_history/{deviceUid} {
+      allow read, write: if true;
+      match /items/{itemId} { allow read, write: if true; }
+    }
+
+    // OneSignal Player IDs
+    match /onesignal_players/{uid} { allow read, write: if true; }
+
+    // بيانات الادارة والمندوبين
+    match /admin_credentials/{docId} { allow read, write: if true; }
+
+    // اشعارات البث
+    match /broadcast_notifications/{docId} { allow read, write: if true; }
+
+    // اي مستند اخر
+    match /{document=**} { allow read, write: if true; }
+  }
+}

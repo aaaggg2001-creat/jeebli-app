@@ -1,4 +1,4 @@
-{
+﻿{
   "functions": [
     {
       "source": "firebase_functions",
@@ -11,5 +11,8 @@
         "*.local"
       ]
     }
-  ]
+  ],
+  "firestore": {
+    "rules": "firestore.rules"
+  }
 }
