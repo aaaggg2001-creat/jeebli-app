@@ -37,7 +37,7 @@ jobs:
 
       - name: Delete old release if exists
         run: |
-          gh release delete latest --yes || true
+          gh release delete latest --yes --cleanup-tag || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
