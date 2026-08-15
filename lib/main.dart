@@ -54,8 +54,7 @@ Future<String> sendOneSignalPushWithResponse({
       },
       body: jsonEncode({
         'app_id': _kOneSignalAppId,
-        // ✅ الطريقة الحديثة: include_subscription_ids بدلاً من include_player_ids المهمل
-        'include_subscription_ids': [playerId],
+        'include_player_ids': [playerId],
         'headings': {'en': title, 'ar': title},
         'contents': {'en': body, 'ar': body},
         'priority': 10,
@@ -944,8 +943,28 @@ class JeebliController extends ChangeNotifier {
     });
   }
 
+  /// ═══ تحديث جميع الإشعارات لتصبح مقروءة ═══
+  Future<void> markAllNotificationsAsRead() async {
+    if (deviceUid.isEmpty) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('notification_history')
+          .doc(deviceUid)
+          .collection('items')
+          .where('isRead', isEqualTo: false)
+          .get();
+          
+      if (snap.docs.isEmpty) return;
 
-
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snap.docs) {
+        batch.update(doc.reference, {'isRead': true});
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('Error marking notifications as read: $e');
+    }
+  }
   void saveSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
