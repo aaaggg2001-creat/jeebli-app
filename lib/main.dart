@@ -804,6 +804,13 @@ class JeebliController extends ChangeNotifier {
       if (deviceUid.isNotEmpty) {
         // حفظ OneSignal Player ID لإرسال الإشعارات حتى والتطبيق مغلق
         _saveOneSignalPlayerId(deviceUid);
+        // استمع لتغيرات اشتراك OneSignal للتأكد من حفظ الـ ID فوراً عند صدوره
+        OneSignal.User.pushSubscription.addObserver((state) {
+          final currentId = OneSignal.User.pushSubscription.id;
+          if (currentId != null && currentId.isNotEmpty) {
+            _saveOneSignalPlayerIdDirect(deviceUid, currentId);
+          }
+        });
       }
     } catch (e) {
       debugPrint('Session load note: $e');
@@ -848,6 +855,30 @@ class JeebliController extends ChangeNotifier {
       } catch (e) {
         debugPrint('OneSignal save attempt ${attempt + 1} error: $e');
       }
+    }
+  }
+
+  /// حفظ OneSignal Player ID المباشر بدون محاولات تكرار
+  Future<void> _saveOneSignalPlayerIdDirect(String uid, String playerId) async {
+    if (uid.isEmpty || playerId.isEmpty) return;
+    try {
+      final db = FirebaseFirestore.instance;
+      await db.collection('onesignal_players').doc(uid).set({
+        'playerId': playerId,
+        'role': _userRole ?? 'customer',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      if (_userRole == 'owner' &&
+          _userRestaurantId != null &&
+          _userRestaurantId!.isNotEmpty) {
+        await db.collection('restaurants').doc(_userRestaurantId!).set({
+          'ownerDeviceUid': uid,
+          'ownerPlayerId': playerId,
+        }, SetOptions(merge: true));
+      }
+      debugPrint('Direct OneSignal Player ID saved: $playerId');
+    } catch (e) {
+      debugPrint('Direct OneSignal Player ID save error: $e');
     }
   }
 
@@ -1976,6 +2007,7 @@ class JeebliController extends ChangeNotifier {
                 .collection('admin_credentials')
                 .doc(phone)
                 .set({'deviceUid': deviceUid}, SetOptions(merge: true));
+            _saveOneSignalPlayerId(deviceUid); // 🔔 تحديث OneSignal لدور المندوب
           }
 
           _addNotification(
@@ -2271,9 +2303,9 @@ class JeebliController extends ChangeNotifier {
     // ── حفظ الإشعار في Firestore (دائم وغير قابل للضياع) ─────────
     if (deviceUid.isNotEmpty) {
       FirebaseFirestore.instance
-          .collection('notification_history')
+          .collection('users')
           .doc(deviceUid)
-          .collection('items')
+          .collection('notifications')
           .add({
             'message': message,
             'isWarning': isWarning,
@@ -5258,6 +5290,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             ),
           ),
           const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(Icons.notifications_outlined, color: context.dynamicWhite70),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const CustomerNotificationsScreen(),
+              ),
+            ),
+            tooltip: 'سجل الإشعارات',
+          ),
           IconButton(
             icon: Icon(Icons.logout_rounded, color: context.dynamicWhite70),
             onPressed: () => controller.logout(),
@@ -8951,6 +8993,19 @@ class RestaurantOwnerAdminScreen extends StatelessWidget {
         backgroundColor: const Color(0xFF1E293B),
         elevation: 0,
         actions: [
+          IconButton(
+            icon: Icon(
+              Icons.notifications_outlined,
+              color: context.dynamicWhite70,
+            ),
+            tooltip: 'سجل الإشعارات',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const CustomerNotificationsScreen(),
+              ),
+            ),
+          ),
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('orders')
