@@ -1368,7 +1368,8 @@ class JeebliController extends ChangeNotifier {
             .doc(ownerDeviceUid)
             .collection('notifications')
             .add({
-              'message': '🛒 $body',
+              'title': title,
+              'message': body,
               'isWarning': false,
               'isOwnerNotification': true,
               'isRead': false,
@@ -1421,7 +1422,8 @@ class JeebliController extends ChangeNotifier {
           .doc(custDeviceUid)
           .collection('notifications')
           .add({
-            'message': '$title\n$body',
+            'title': title,
+            'message': body,
             'isWarning': false,
             'isOwnerNotification': false,
             'isRead': false,
@@ -1483,7 +1485,8 @@ class JeebliController extends ChangeNotifier {
             .doc(driverDeviceUid)
             .collection('notifications')
             .add({
-              'message': '$title\n$body',
+              'title': title,
+              'message': body,
               'isWarning': false,
               'isOwnerNotification': false,
               'isRead': false,
@@ -2307,6 +2310,7 @@ class JeebliController extends ChangeNotifier {
           .doc(deviceUid)
           .collection('notifications')
           .add({
+            'title': '🔔 جيبلي',
             'message': message,
             'isWarning': isWarning,
             'isOwnerNotification': isOwnerNotification,
@@ -3504,7 +3508,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
                 
 
                 if (snapshot.connectionState == ConnectionState.waiting &&
-                    true) {
+                    firestoreDocs.isEmpty) {
                   return const Center(
                     child: CircularProgressIndicator(color: Color(0xFFFF8F00)),
                   );
@@ -3525,7 +3529,9 @@ class CustomerNotificationsScreen extends StatelessWidget {
                       final doc = firestoreDocs[index];
                       final data = doc.data() as Map<String, dynamic>;
                       
+                      final title = data['title'] as String? ?? '';
                       final message = data['message'] as String? ?? '';
+                      final fullMsg = title.isNotEmpty ? '$title\n$message' : message;
                       final isWarning = data['isWarning'] as bool? ?? false;
                       
                       final ts = data['createdAt'] as Timestamp?;
@@ -3533,7 +3539,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
                       
                       return _buildNotifTile(
                         controller,
-                        message,
+                        fullMsg,
                         isWarning,
                         time,
                       );
@@ -5152,10 +5158,54 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   int _prevOrderCount = -1;
   StreamSubscription<Position>? _locationSubscription;
   String? _activeTrackingOrderId;
+  StreamSubscription<QuerySnapshot>? _notifSubscription;
+  bool _isFirstNotifLoad = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_notifSubscription == null) {
+      _startDriverNotifListener();
+    }
+  }
+
+  void _startDriverNotifListener() {
+    final controller = JeebliProvider.of(context);
+    final uid = controller.deviceUid;
+    if (uid.isEmpty) return;
+
+    _notifSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((snap) async {
+      if (_isFirstNotifLoad) {
+        _isFirstNotifLoad = false;
+        return;
+      }
+      for (final change in snap.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data() as Map<String, dynamic>?;
+          if (data != null) {
+            final msg = data['message'] as String? ?? '';
+            final title = data['title'] as String? ?? '🔔 إشعار جديد';
+            await _localNotif.show(
+              title: title,
+              body: msg,
+              id: DateTime.now().millisecondsSinceEpoch % 100000,
+            );
+          }
+        }
+      }
+    });
+  }
 
   @override
   void dispose() {
     _locationSubscription?.cancel();
+    _notifSubscription?.cancel();
     super.dispose();
   }
 
@@ -8971,8 +9021,66 @@ class RestaurantOrdersNotifScreen extends StatelessWidget {
 
 /// ============================================================================
 
-class RestaurantOwnerAdminScreen extends StatelessWidget {
+class RestaurantOwnerAdminScreen extends StatefulWidget {
   const RestaurantOwnerAdminScreen({super.key});
+
+  @override
+  State<RestaurantOwnerAdminScreen> createState() => _RestaurantOwnerAdminScreenState();
+}
+
+class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen> {
+  StreamSubscription<QuerySnapshot>? _notifSubscription;
+  bool _isFirstLoad = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_notifSubscription == null) {
+      _startNotifListener();
+    }
+  }
+
+  void _startNotifListener() {
+    final controller = JeebliProvider.of(context);
+    final uid = controller.deviceUid;
+    if (uid.isEmpty) return;
+
+    _notifSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((snap) async {
+      if (_isFirstLoad) {
+        _isFirstLoad = false;
+        return;
+      }
+      if (snap.docChanges.isNotEmpty) {
+        for (final change in snap.docChanges) {
+          if (change.type == DocumentChangeType.added) {
+            final data = change.doc.data() as Map<String, dynamic>?;
+            if (data != null) {
+              final msg = data['message'] as String? ?? '';
+              final title = data['title'] as String? ?? '🔔 إشعار جديد';
+              // Show local tray notification
+              await _localNotif.show(
+                title: title,
+                body: msg,
+                id: DateTime.now().millisecondsSinceEpoch % 100000,
+              );
+            }
+          }
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _notifSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
