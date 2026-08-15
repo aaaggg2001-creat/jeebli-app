@@ -733,6 +733,9 @@ class JeebliController extends ChangeNotifier {
   StreamSubscription? _connectivitySubscription;
   StreamSubscription<QuerySnapshot>? _firestoreNotifSubscription;
 
+  bool _hasUnreadNotifications = false;
+  bool get hasUnreadNotifications => _hasUnreadNotifications;
+
   JeebliController() {
     _initConnectivity();
     _loadLocalData().then((_) {
@@ -898,6 +901,22 @@ class JeebliController extends ChangeNotifier {
         .orderBy('createdAt', descending: true)
         .snapshots()
         .listen((snap) async {
+      
+      // تحديث حالة النقطة الحمراء (غير مقروء)
+      bool currentHasUnread = false;
+      for (final doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data != null && data['isRead'] == false) {
+          currentHasUnread = true;
+          break;
+        }
+      }
+      
+      if (_hasUnreadNotifications != currentHasUnread) {
+        _hasUnreadNotifications = currentHasUnread;
+        notifyListeners();
+      }
+
       if (isFirstLoad) {
         isFirstLoad = false;
         return;
@@ -3458,9 +3477,27 @@ class MainNavigationShell extends StatelessWidget {
               label: 'السلة',
             ),
             NavigationDestination(
-              icon: Icon(
-                Icons.notifications_outlined,
-                color: controller.subtextColor,
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    Icons.notifications_outlined,
+                    color: controller.subtextColor,
+                  ),
+                  if (controller.hasUnreadNotifications)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          color: Colors.redAccent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               selectedIcon: Icon(
                 Icons.notifications,
@@ -3503,6 +3540,7 @@ class CustomerNotificationsScreen extends StatelessWidget {
     final controller = JeebliProvider.of(context);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.markAllNotificationsAsRead();
     });
 
     final deviceUid = controller.deviceUid;
@@ -5345,7 +5383,25 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
           ),
           const SizedBox(width: 8),
           IconButton(
-            icon: Icon(Icons.notifications_outlined, color: context.dynamicWhite70),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.notifications_outlined, color: context.dynamicWhite70),
+                if (controller.hasUnreadNotifications)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Colors.redAccent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -9054,9 +9110,27 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
         elevation: 0,
         actions: [
           IconButton(
-            icon: Icon(
-              Icons.notifications_outlined,
-              color: context.dynamicWhite70,
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(
+                  Icons.notifications_outlined,
+                  color: context.dynamicWhite70,
+                ),
+                if (controller.hasUnreadNotifications)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Colors.redAccent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             tooltip: 'سجل الإشعارات',
             onPressed: () => Navigator.push(
