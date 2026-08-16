@@ -48,11 +48,11 @@ jobs:
           tag_name: latest
           name: "جيب لي - آخر إصدار"
           body: |
-            ## تحديث 🚀
-            - واجهة لوحة تحكم صاحب المطعم محسّنة
-            - إصلاح عرض صور المنتجات من جميع المصادر
-            - نظام عروض ترويجية جماعية للسوبر أدمن
-            - صوت إشعارات مخصص وحصري لجيبلي
+            ## تحديث تلقائي 🚀
+            - نظام إشعارات جديد كلياً (Clean Slate)
+            - يعتمد على OneSignal v5 فقط
+            - سجل إشعارات دائم عبر Firestore StreamBuilder
+            - يعمل حتى لو التطبيق مغلق تماماً
           files: build/app/outputs/flutter-apk/app-release.apk
           make_latest: true
         env:

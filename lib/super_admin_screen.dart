@@ -280,8 +280,11 @@ class _RestaurantsTab extends StatelessWidget {
           ListTile(
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: CustomAppImage(imageUrl: rest.imageUrl,
-                  width: 50, height: 50, fit: BoxFit.cover),
+              child: Image.network(rest.imageUrl,
+                  width: 50, height: 50, fit: BoxFit.cover,
+                  errorBuilder: (ctx2, err, stack) =>
+                      Container(width: 50, height: 50, color: Colors.grey[800],
+                          child: const Icon(Icons.store, color: Colors.grey))),
             ),
             title: Text(rest.name,
                 style: const TextStyle(
@@ -802,8 +805,12 @@ class _ProductsTab extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: CustomAppImage(imageUrl: prod.imageUrl,
-                  width: 48, height: 48, fit: BoxFit.cover),
+              child: Image.network(prod.imageUrl,
+                  width: 48, height: 48, fit: BoxFit.cover,
+                  errorBuilder: (ctx2, err, stack) => Container(
+                      width: 48, height: 48,
+                      color: Colors.grey[800],
+                      child: const Icon(Icons.fastfood, color: Colors.grey))),
             ),
             if (hasDiscount)
               Positioned(
@@ -1215,29 +1222,32 @@ class _NotificationsTabState extends State<_NotificationsTab> {
                       return;
                     }
                     setState(() => _isSending = true);
-                    try {
-                      await FirebaseFirestore.instance
-                          .collection('broadcast_notifications')
-                          .add({
-                        'title': title,
-                        'body': body,
-                        'type': 'promo',
-                        'isRead': false,
-                        'createdAt': FieldValue.serverTimestamp(),
-                      });
-                      setState(() => _isSending = false);
-                      if (context.mounted) {
+                    final success = await sendOneSignalBroadcast(title: title, body: body);
+                    // حفظ الإشعار في Firestore ليظهر في نافذة إشعارات كل زبون
+                    if (success) {
+                      try {
+                        await FirebaseFirestore.instance
+                            .collection('broadcast_notifications')
+                            .add({
+                          'title': title,
+                          'body': body,
+                          'type': 'promo',
+                          'isRead': false,
+                          'createdAt': FieldValue.serverTimestamp(),
+                        });
+                      } catch (_) {}
+                    }
+                    setState(() => _isSending = false);
+                    if (context.mounted) {
+                      if (success) {
                         _promoTitleCtrl.clear();
                         _promoBodyCtrl.clear();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('✅ تم إرسال العرض لجميع المستخدمين بنجاح!'), backgroundColor: Colors.green),
                         );
-                      }
-                    } catch (e) {
-                      setState(() => _isSending = false);
-                      if (context.mounted) {
+                      } else {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('❌ فشل الإرسال: '), backgroundColor: Colors.red),
+                          const SnackBar(content: Text('❌ فشل الإرسال، تحقق من اتصال الإنترنت'), backgroundColor: Colors.red),
                         );
                       }
                     }

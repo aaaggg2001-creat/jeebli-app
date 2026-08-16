@@ -15,13 +15,99 @@ import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
 import 'super_admin_screen.dart';
 
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  print("Handling a background message: ${message.messageId}");
+// ─── OneSignal Config ──────────────────────────────────────────────────────
+const String _kOneSignalAppId = '43a24efe-0d39-453f-8b14-1c3a6282c230';
+const String _kOneSignalRestKey =
+    'os_v2_app_iore57qnhfct7cyudq5gfawcgat657gcghhuizm565y42brttgdfspecp5gpnbgykubv6gabyz63svr6nqkvd4gk64yj4nvws5gtxba';
+
+/// إرسال Push Notification عبر OneSignal REST API
+/// يعمل حتى والتطبيق مغلق تماماً
+Future<void> sendOneSignalPush({
+  required String playerId,
+  required String title,
+  required String body,
+  Map<String, String> data = const {},
+}) async {
+  await sendOneSignalPushWithResponse(
+      playerId: playerId, title: title, body: body, data: data);
+}
+
+/// إرسال Push Notification مع إرجاع نص الاستجابة للتشخيص
+Future<String> sendOneSignalPushWithResponse({
+  required String playerId,
+  required String title,
+  required String body,
+  Map<String, String> data = const {},
+}) async {
+  if (playerId.isEmpty) return 'empty_player_id';
+  try {
+    final response = await http.post(
+      Uri.parse('https://onesignal.com/api/v1/notifications'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Basic $_kOneSignalRestKey',
+      },
+      body: jsonEncode({
+        'app_id': _kOneSignalAppId,
+        'include_player_ids': [playerId],
+        'headings': {'en': title, 'ar': title},
+        'contents': {'en': body, 'ar': body},
+        'priority': 10,
+        'android_accent_color': 'FFFF8F00',
+        'android_visibility': 1,
+        'existing_android_channel_id': 'jeebli_alerts_v1',
+        'android_channel_id': 'jeebli_alerts_v1',
+        'content_available': true,
+        'data': data,
+      }),
+    );
+    debugPrint(
+        'OneSignal [${response.statusCode}]: ${response.body}');
+    return response.body;
+  } catch (e) {
+    debugPrint('OneSignal error: $e');
+    return 'error: $e';
+  }
+}
+
+
+/// ─── إرسال إشعار ترويجي لجميع مستخدمي التطبيق ────────────────────────────
+Future<bool> sendOneSignalBroadcast({
+  required String title,
+  required String body,
+}) async {
+  try {
+    final response = await http.post(
+      Uri.parse('https://onesignal.com/api/v1/notifications'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Basic $_kOneSignalRestKey',
+      },
+      body: jsonEncode({
+        'app_id': _kOneSignalAppId,
+        'included_segments': ['Subscribed Users'],
+        'headings': {'en': title, 'ar': title},
+        'contents': {'en': body, 'ar': body},
+        'priority': 10,
+        'android_accent_color': 'FFFF8F00',
+        'android_visibility': 1,
+        'existing_android_channel_id': 'jeebli_alerts_v1',
+        'android_channel_id': 'jeebli_alerts_v1',
+        'content_available': true,
+        'data': {'screen': 'promo'},
+      }),
+    );
+    debugPrint('📢 OneSignal Broadcast sent! Status: ${response.statusCode}');
+    return response.statusCode == 200;
+  } catch (e) {
+    debugPrint('❌ OneSignal Broadcast error: $e');
+    return false;
+  }
 }
 
 /// ─── فتح تطبيق الخرائط المباشر (Belli / Uber / Google Maps) ───────────────
@@ -60,29 +146,12 @@ class JeebliNotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
-  // قناة FCM الرئيسية - يجب أن تطابق channelId في Cloud Functions
-  // v2 = صوت مخصص جيبلي
-  static const _fcmChannel = AndroidNotificationChannel(
-    'jeebli_orders_v2',
-    'طلبات جيبلي',
-    description: 'إشعارات الطلبات والتوصيل - عالية الأهمية',
-    importance: Importance.max,
-    playSound: true,
-    sound: RawResourceAndroidNotificationSound('jeebli_notification'),
-    enableVibration: true,
-    showBadge: true,
-    enableLights: true,
-    ledColor: Color(0xFFFF8F00),
-  );
-
-  // قناة الإشعارات المحلية
-  static const _localChannel = AndroidNotificationChannel(
-    'jeebli_alerts_v2',
+  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+    'jeebli_alerts_v1',
     'إشعارات جيبلي الهامة',
     description: 'إشعارات الطلبات والتوصيل',
     importance: Importance.max,
     playSound: true,
-    sound: RawResourceAndroidNotificationSound('jeebli_notification'),
     enableVibration: true,
     showBadge: true,
     enableLights: true,
@@ -93,10 +162,9 @@ class JeebliNotificationService {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidInit);
     await _plugin.initialize(initSettings);
-    final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-    // إنشاء كلا القناتين
-    await android?.createNotificationChannel(_fcmChannel);
-    await android?.createNotificationChannel(_localChannel);
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(_channel);
   }
 
   Future<void> show({
@@ -105,14 +173,13 @@ class JeebliNotificationService {
     int id = 1,
   }) async {
     final androidDetails = AndroidNotificationDetails(
-      'jeebli_orders_v2', // القناة الجديدة مع الصوت المخصص
-      'طلبات جيبلي',
+      'jeebli_alerts_v1',
+      'إشعارات جيبلي الهامة',
       channelDescription: 'إشعارات الطلبات والتوصيل',
       importance: Importance.max,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
       playSound: true,
-      sound: const RawResourceAndroidNotificationSound('jeebli_notification'),
       enableVibration: true,
       autoCancel: false,
       color: const Color(0xFFFF8F00),
@@ -133,7 +200,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // ── تسجيل Background handler قبل أي شيء ──────────────────────
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
 
   try {
     // الاعتماد بالكامل على google-services.json بعد تفعيل البلوجن
@@ -146,20 +213,10 @@ void main() async {
 
     // ── تهيئة نظام الإشعارات ──────────────────────────────────────
 
+    // ── تهيئة OneSignal للإشعارات حتى والتطبيق مغلق ──────────────
+    OneSignal.initialize(_kOneSignalAppId);
     await _localNotif.initialize();
-
-    // ── معالج إشعارات FCM في الواجهة الأمامية ──────────────────────
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      final notification = message.notification;
-      if (notification != null) {
-        await _localNotif.show(
-          title: notification.title ?? '🔔 إشعار جديد',
-          body: notification.body ?? '',
-          id: DateTime.now().millisecondsSinceEpoch % 100000,
-        );
-      }
-    });
-
+    OneSignal.Notifications.requestPermission(true);
   } catch (e) {
     debugPrint('Firebase init note: $e');
   }
@@ -749,8 +806,15 @@ class JeebliController extends ChangeNotifier {
 
       // ── حفظ FCM Token + OneSignal Player ID في Firestore ────────────────
       if (deviceUid.isNotEmpty) {
-        // ── حفظ FCM Token ────────────────
-        _saveFCMToken(deviceUid);
+        // حفظ OneSignal Player ID لإرسال الإشعارات حتى والتطبيق مغلق
+        _saveOneSignalPlayerId(deviceUid);
+        // استمع لتغيرات اشتراك OneSignal للتأكد من حفظ الـ ID فوراً عند صدوره
+        OneSignal.User.pushSubscription.addObserver((state) {
+          final currentId = OneSignal.User.pushSubscription.id;
+          if (currentId != null && currentId.isNotEmpty) {
+            _saveOneSignalPlayerIdDirect(deviceUid, currentId);
+          }
+        });
         // بدء مستمع الإشعارات العالمي
         _startGlobalNotificationListener();
       }
@@ -763,37 +827,64 @@ class JeebliController extends ChangeNotifier {
     }
   }
 
-  /// حفظ FCM Token في Firestore
-  Future<void> _saveFCMToken(String uid) async {
+  /// حفظ OneSignal Player ID في Firestore مع retry تلقائي
+  Future<void> _saveOneSignalPlayerId(String uid) async {
     if (uid.isEmpty) return;
-    try {
-      final messaging = FirebaseMessaging.instance;
-      NotificationSettings settings = await messaging.requestPermission(
-        alert: true, badge: true, sound: true,
-      );
-      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        String? token = await messaging.getToken();
-        if (token != null) {
-          final db = FirebaseFirestore.instance;
-          await db.collection('fcm_tokens').doc(uid).set({
-            'token': token,
-            'role': _userRole ?? 'customer',
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-
-          if (_userRole == 'owner' &&
-              _userRestaurantId != null &&
-              _userRestaurantId!.isNotEmpty) {
-            await db.collection('restaurants').doc(_userRestaurantId!).set({
-              'ownerDeviceUid': uid,
-              'ownerPlayerId': token, // keeping field name for backward compatibility or we can change to ownerFcmToken
-            }, SetOptions(merge: true));
-          }
-          debugPrint('FCM Token saved OK: $token');
+    for (int attempt = 0; attempt < 6; attempt++) {
+      try {
+        // انتظر قليلاً لكي يكتمل تهيئة OneSignal SDK
+        await Future.delayed(Duration(seconds: attempt == 0 ? 3 : 5));
+        final playerId = OneSignal.User.pushSubscription.id;
+        if (playerId == null || playerId.isEmpty) {
+          debugPrint('OneSignal not ready (attempt ${attempt + 1}/6)');
+          continue;
         }
+        final db = FirebaseFirestore.instance;
+        // حفظ تحت معرّف الجهاز (لجميع الأدوار)
+        await db.collection('onesignal_players').doc(uid).set({
+          'playerId': playerId,
+          'role': _userRole ?? 'customer',
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        // إذا كان مالك مطعم: احفظ أيضاً في وثيقة المطعم مباشرةً
+        if (_userRole == 'owner' &&
+            _userRestaurantId != null &&
+            _userRestaurantId!.isNotEmpty) {
+          await db.collection('restaurants').doc(_userRestaurantId!).set({
+            'ownerDeviceUid': uid,
+            'ownerPlayerId': playerId,
+          }, SetOptions(merge: true));
+          debugPrint('Owner PlayerId saved in restaurant doc: $playerId');
+        }
+        debugPrint('OneSignal Player ID saved OK: $playerId');
+        return; // نجح
+      } catch (e) {
+        debugPrint('OneSignal save attempt ${attempt + 1} error: $e');
       }
+    }
+  }
+
+  /// حفظ OneSignal Player ID المباشر بدون محاولات تكرار
+  Future<void> _saveOneSignalPlayerIdDirect(String uid, String playerId) async {
+    if (uid.isEmpty || playerId.isEmpty) return;
+    try {
+      final db = FirebaseFirestore.instance;
+      await db.collection('onesignal_players').doc(uid).set({
+        'playerId': playerId,
+        'role': _userRole ?? 'customer',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      if (_userRole == 'owner' &&
+          _userRestaurantId != null &&
+          _userRestaurantId!.isNotEmpty) {
+        await db.collection('restaurants').doc(_userRestaurantId!).set({
+          'ownerDeviceUid': uid,
+          'ownerPlayerId': playerId,
+        }, SetOptions(merge: true));
+      }
+      debugPrint('Direct OneSignal Player ID saved: $playerId');
     } catch (e) {
-      debugPrint('FCM Token error: $e');
+      debugPrint('Direct OneSignal Player ID save error: $e');
     }
   }
 
@@ -874,110 +965,6 @@ class JeebliController extends ChangeNotifier {
       debugPrint('Error marking notifications as read: $e');
     }
   }
-
-  /// ═══ إشعار صاحب المطعم - Cloud Function ترسل الـ Push، هنا نحفظ فقط في Firestore ═══
-  Future<void> _notifyOwnerNewOrder({
-    required String restaurantId,
-    required String customerName,
-    required double totalAmount,
-    required String orderId,
-  }) async {
-    try {
-      final restDoc = await FirebaseFirestore.instance.collection('restaurants').doc(restaurantId).get();
-      if (!restDoc.exists) return;
-      final ownerDeviceUid = restDoc.data()?['ownerDeviceUid'] as String? ?? '';
-      if (ownerDeviceUid.isEmpty) return;
-      final title = '🔔 طلب جديد!';
-      final body = '$customerName طلب بمبلغ ${totalAmount.toStringAsFixed(0)} د.ع';
-      // حفظ الإشعار في سجل الإشعارات الدائم - Cloud Function ترسل الـ Push
-      await FirebaseFirestore.instance
-          .collection('notification_history')
-          .doc(ownerDeviceUid)
-          .collection('items')
-          .add({
-            'title': title,
-            'message': body,
-            'isWarning': false,
-            'isOwnerNotification': true,
-            'isRead': false,
-            'createdAt': FieldValue.serverTimestamp(),
-            'orderId': orderId,
-          });
-    } catch (e) {
-      debugPrint('Notify owner error: $e');
-    }
-  }
-
-  /// ═══ إشعار الزبون - Cloud Function ترسل الـ Push، هنا نحفظ فقط في Firestore ═══
-  Future<void> _notifyCustomer({
-    required String custDeviceUid,
-    required String title,
-    required String body,
-    required String orderId,
-  }) async {
-    try {
-      if (custDeviceUid.isEmpty) return;
-      // حفظ الإشعار في سجل الزبون الدائم - Cloud Function ترسل الـ Push تلقائياً عند تغيير الحالة
-      await FirebaseFirestore.instance
-          .collection('notification_history')
-          .doc(custDeviceUid)
-          .collection('items')
-          .add({
-            'title': title,
-            'message': body,
-            'isWarning': false,
-            'isOwnerNotification': false,
-            'isRead': false,
-            'createdAt': FieldValue.serverTimestamp(),
-            'orderId': orderId,
-          });
-      // إشعار محلي إذا كان التطبيق مفتوحاً
-      if (custDeviceUid == deviceUid) {
-        await _localNotif.show(title: title, body: body, id: 10);
-      }
-    } catch (e) {
-      debugPrint('Notify customer error: $e');
-    }
-  }
-
-  /// ═══ إشعار المندوبين - Cloud Function ترسل الـ Push، هنا نحفظ فقط في Firestore ═══
-  Future<void> _notifyAllDrivers({
-    required String restaurantId,
-    required String title,
-    required String body,
-    required String orderId,
-  }) async {
-    try {
-      final driversSnap = await FirebaseFirestore.instance
-          .collection('admin_credentials')
-          .where('role', isEqualTo: 'driver')
-          .where('restaurantId', isEqualTo: restaurantId)
-          .get();
-      for (final driverDoc in driversSnap.docs) {
-        final driverDeviceUid = driverDoc.data()['deviceUid']?.toString() ?? '';
-        if (driverDeviceUid.isEmpty) continue;
-        await FirebaseFirestore.instance
-            .collection('notification_history')
-            .doc(driverDeviceUid)
-            .collection('items')
-            .add({
-              'title': title,
-              'message': body,
-              'isWarning': false,
-              'isOwnerNotification': false,
-              'isRead': false,
-              'createdAt': FieldValue.serverTimestamp(),
-              'orderId': orderId,
-            });
-        if (driverDeviceUid == deviceUid) {
-          await _localNotif.show(title: title, body: body, id: 30);
-        }
-      }
-    } catch (e) {
-      debugPrint('Notify drivers error: $e');
-    }
-  }
-
   void saveSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1409,8 +1396,197 @@ class JeebliController extends ChangeNotifier {
   double? customerLat;
   double? customerLng;
 
-  
-      /// ═══ المستمع الذكي للزبون - يرصد تغيرات حالة طلبه فوراً ويرسل إشعاراً خاصاً به ═══
+  /// ═══ إرسال إشعار OneSignal لصاحب المطعم عند طلب جديد ═══
+  Future<void> _notifyOwnerNewOrder({
+    required String restaurantId,
+    required String customerName,
+    required double totalAmount,
+    required String orderId,
+  }) async {
+    try {
+      if (restaurantId.isEmpty) return;
+      final restDoc = await FirebaseFirestore.instance
+          .collection('restaurants')
+          .doc(restaurantId)
+          .get();
+      if (!restDoc.exists) return;
+
+      // المسار الأول: ownerPlayerId محفوظ مباشرة في وثيقة المطعم
+      String playerId = restDoc.data()?['ownerPlayerId'] as String? ?? '';
+      String ownerDeviceUid = restDoc.data()?['ownerDeviceUid'] as String? ?? '';
+
+      // المسار الثاني: البحث عبر ownerDeviceUid → onesignal_players
+      if (playerId.isEmpty && ownerDeviceUid.isNotEmpty) {
+        final playerDoc = await FirebaseFirestore.instance
+            .collection('onesignal_players')
+            .doc(ownerDeviceUid)
+            .get();
+        playerId = playerDoc.data()?['playerId'] as String? ?? '';
+      }
+
+      final title = '🔔 طلب جديد!';
+      final body = '$customerName طلب بمبلغ ${totalAmount.toStringAsFixed(0)} IQD';
+
+      if (playerId.isNotEmpty) {
+        final result = await sendOneSignalPushWithResponse(
+          playerId: playerId,
+          title: title,
+          body: body,
+          data: {'orderId': orderId, 'screen': 'orders'},
+        );
+        debugPrint('Notify owner result: $result');
+      } else {
+        debugPrint('Owner playerId not found for: $restaurantId');
+      }
+      // ✅ إشعار محلي في البردة إذا كان صاحب المطعم فاتحاً التطبيق
+      if (ownerDeviceUid == this.deviceUid) {
+        await _localNotif.show(title: title, body: body, id: 20);
+      }
+
+      // ✅ حفظ الإشعار في سجل الإشعارات الدائم لصاحب المطعم حتى يراه عند فتح التطبيق
+      if (ownerDeviceUid.isNotEmpty) {
+        FirebaseFirestore.instance
+            .collection('notification_history')
+            .doc(ownerDeviceUid)
+            .collection('items')
+            .add({
+              'title': title,
+              'message': body,
+              'isWarning': false,
+              'isOwnerNotification': true,
+              'isRead': false,
+              'createdAt': FieldValue.serverTimestamp(),
+              'orderId': orderId,
+            })
+            .catchError((e) {
+              debugPrint('Owner notif save error: $e');
+              throw e;
+            });
+      }
+    } catch (e) {
+      debugPrint('Notify owner error: $e');
+    }
+  }
+
+
+  /// ═══ إرسال إشعار OneSignal للزبون عند تغيير حالة طلبه ═══
+  Future<void> _notifyCustomer({
+    required String custDeviceUid,
+    required String title,
+    required String body,
+    required String orderId,
+  }) async {
+    try {
+      if (custDeviceUid.isEmpty) return;
+
+      // إرسال إشعار Push عبر OneSignal (يصل حتى عند إغلاق التطبيق)
+      final playerDoc = await FirebaseFirestore.instance
+          .collection('onesignal_players')
+          .doc(custDeviceUid)
+          .get();
+      final playerId = playerDoc.data()?['playerId'] ?? '';
+      if (playerId.isNotEmpty) {
+        await sendOneSignalPush(
+          playerId: playerId,
+          title: title,
+          body: body,
+          data: {'orderId': orderId, 'screen': 'track'},
+        );
+      }
+      // ✅ إشعار محلي في البردة للزبون إذا كان التطبيق مفتوحاً
+      if (custDeviceUid == this.deviceUid) {
+        await _localNotif.show(title: title, body: body, id: 10);
+      }
+
+      // ✅ حفظ الإشعار في سجل الإشعارات الدائم للزبون (يظهر في نافذة الإشعارات)
+      FirebaseFirestore.instance
+          .collection('notification_history')
+          .doc(custDeviceUid)
+          .collection('items')
+          .add({
+            'title': title,
+            'message': body,
+            'isWarning': false,
+            'isOwnerNotification': false,
+            'isRead': false,
+            'createdAt': FieldValue.serverTimestamp(),
+            'orderId': orderId,
+          })
+          .catchError((e) {
+            debugPrint('Customer notif save error: $e');
+            throw e;
+          });
+    } catch (e) {
+      debugPrint('Notify customer error: $e');
+    }
+  }
+
+  /// ═══ إرسال إشعار لجميع المندوبين المسجلين في مطعم معين ═══
+  Future<void> _notifyAllDrivers({
+    required String restaurantId,
+    required String title,
+    required String body,
+    required String orderId,
+  }) async {
+    try {
+      // جلب جميع المندوبين الخاصين بهذا المطعم
+      final driversSnap = await FirebaseFirestore.instance
+          .collection('admin_credentials')
+          .where('role', isEqualTo: 'driver')
+          .where('restaurantId', isEqualTo: restaurantId)
+          .get();
+
+      for (final driverDoc in driversSnap.docs) {
+        final driverDeviceUid =
+            driverDoc.data()['deviceUid']?.toString() ?? '';
+        if (driverDeviceUid.isEmpty) continue;
+
+        final playerDoc = await FirebaseFirestore.instance
+            .collection('onesignal_players')
+            .doc(driverDeviceUid)
+            .get();
+        final playerId = playerDoc.data()?['playerId'] ?? '';
+
+        // إرسال Push إذا كان لديه playerId
+        if (playerId.isNotEmpty) {
+          await sendOneSignalPush(
+            playerId: playerId,
+            title: title,
+            body: body,
+            data: {'orderId': orderId, 'screen': 'driver_dashboard'},
+          );
+        }
+        // ✅ إشعار محلي في البردة إذا كان المندوب فاتحاً التطبيق
+        if (driverDeviceUid == this.deviceUid) {
+          await _localNotif.show(title: title, body: body, id: 30);
+        }
+
+        // ✅ دائماً احفظ الإشعار في سجل المندوب الدائم
+        FirebaseFirestore.instance
+            .collection('notification_history')
+            .doc(driverDeviceUid)
+            .collection('items')
+            .add({
+              'title': title,
+              'message': body,
+              'isWarning': false,
+              'isOwnerNotification': false,
+              'isRead': false,
+              'createdAt': FieldValue.serverTimestamp(),
+              'orderId': orderId,
+            })
+            .catchError((e) {
+              debugPrint('Driver notif save error: $e');
+              throw e;
+            });
+      }
+      debugPrint('✅ Notified all drivers for restaurant: $restaurantId');
+    } catch (e) {
+      debugPrint('Notify all drivers error: $e');
+    }
+  }
+
+  /// ═══ المستمع الذكي للزبون - يرصد تغيرات حالة طلبه فوراً ويرسل إشعاراً خاصاً به ═══
   
 
   
@@ -1899,7 +2075,7 @@ class JeebliController extends ChangeNotifier {
                 .collection('restaurants')
                 .doc(_userRestaurantId!)
                 .set({'ownerDeviceUid': deviceUid}, SetOptions(merge: true));
-            _saveFCMToken(deviceUid);
+            _saveOneSignalPlayerId(deviceUid);
           }
           notifyListeners();
           return true;
@@ -1916,7 +2092,7 @@ class JeebliController extends ChangeNotifier {
                 .collection('admin_credentials')
                 .doc(phone)
                 .set({'deviceUid': deviceUid}, SetOptions(merge: true));
-            _saveFCMToken(deviceUid); // 🔔 تحديث FCM Token لدور المندوب
+            _saveOneSignalPlayerId(deviceUid); // 🔔 تحديث OneSignal لدور المندوب
           }
 
           _addNotification(
@@ -6131,8 +6307,8 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: CustomAppImage(
-                          imageUrl: rest.imageUrl,
+                        child: Image.network(
+                          rest.imageUrl,
                           width: 75,
                           height: 75,
                           fit: BoxFit.cover,
@@ -6348,11 +6524,16 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: CustomAppImage(
-                                  imageUrl: prod.imageUrl,
+                                child: Image.network(
+                                  prod.imageUrl,
                                   width: 88,
                                   height: 88,
                                   fit: BoxFit.cover,
+                                  errorBuilder: (ctx, err, stack) => Container(
+                                    width: 88,
+                                    height: 88,
+                                    color: const Color(0xFF0F172A),
+                                  ),
                                 ),
                               ),
                               if (!prod.isAvailable)
@@ -6647,8 +6828,8 @@ class CartScreen extends StatelessWidget {
                           children: [
                             ClipRRect(
                               borderRadius: BorderRadius.circular(10),
-                              child: CustomAppImage(
-                                imageUrl: item.product.imageUrl,
+                              child: Image.network(
+                                item.product.imageUrl,
                                 width: 65,
                                 height: 65,
                                 fit: BoxFit.cover,
@@ -10737,6 +10918,15 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
             .snapshots(),
         builder: (context, snapshot) {
           final docs = snapshot.data?.docs ?? [];
+          final totalSales = docs.fold(
+            0.0,
+            (acc, doc) =>
+                acc +
+                (((doc.data() as Map<String, dynamic>)['totalAmount'] as num?)
+                        ?.toDouble() ??
+                    0.0),
+          );
+          final orderCount = docs.length;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -10783,7 +10973,28 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
                 ],
               ),
               const SizedBox(height: 14),
-
+              Row(
+                children: [
+                  Expanded(
+                    child: _analyticsItem(
+                      'إجمالي مبيعاتك',
+                      '${totalSales.toStringAsFixed(0)} د.ع',
+                      Icons.payments_outlined,
+                      Colors.greenAccent,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _analyticsItem(
+                      'الطلبات الناجحة',
+                      '$orderCount طلب',
+                      Icons.shopping_bag_outlined,
+                      Colors.amber,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
@@ -10898,8 +11109,8 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
                 ),
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: CustomAppImage(
-                    imageUrl: prod.imageUrl,
+                  child: Image.network(
+                    prod.imageUrl,
                     width: 48,
                     height: 48,
                     fit: BoxFit.cover,
