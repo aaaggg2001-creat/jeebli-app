@@ -280,7 +280,7 @@ class _RestaurantsTab extends StatelessWidget {
           ListTile(
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: Image.network(rest.imageUrl,
+              child: CustomAppImage(imageUrl: rest.imageUrl,
                   width: 50, height: 50, fit: BoxFit.cover,
                   errorBuilder: (ctx2, err, stack) =>
                       Container(width: 50, height: 50, color: Colors.grey[800],
@@ -805,7 +805,7 @@ class _ProductsTab extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.network(prod.imageUrl,
+              child: CustomAppImage(imageUrl: prod.imageUrl,
                   width: 48, height: 48, fit: BoxFit.cover,
                   errorBuilder: (ctx2, err, stack) => Container(
                       width: 48, height: 48,

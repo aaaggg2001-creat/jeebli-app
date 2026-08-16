@@ -6307,8 +6307,7 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          rest.imageUrl,
+                        child: CustomAppImage(imageUrl: rest.imageUrl,
                           width: 75,
                           height: 75,
                           fit: BoxFit.cover,
@@ -6524,15 +6523,11 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: Image.network(
-                                  prod.imageUrl,
+                                child: CustomAppImage(imageUrl: prod.imageUrl,
                                   width: 88,
                                   height: 88,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (ctx, err, stack) => Container(
-                                    width: 88,
-                                    height: 88,
-                                    color: const Color(0xFF0F172A),
+                                  
                                   ),
                                 ),
                               ),
@@ -6828,8 +6823,7 @@ class CartScreen extends StatelessWidget {
                           children: [
                             ClipRRect(
                               borderRadius: BorderRadius.circular(10),
-                              child: Image.network(
-                                item.product.imageUrl,
+                              child: CustomAppImage(imageUrl: item.product.imageUrl,
                                 width: 65,
                                 height: 65,
                                 fit: BoxFit.cover,
@@ -11079,8 +11073,7 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
                 ),
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: Image.network(
-                    prod.imageUrl,
+                  child: CustomAppImage(imageUrl: prod.imageUrl,
                     width: 48,
                     height: 48,
                     fit: BoxFit.cover,
