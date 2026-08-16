@@ -18,6 +18,9 @@ service cloud.firestore {
       match /items/{itemId} { allow read, write: if true; }
     }
 
+    // FCM Tokens
+    match /fcm_tokens/{uid} { allow read, write: if true; }
+
     // OneSignal Player IDs
     match /onesignal_players/{uid} { allow read, write: if true; }
 

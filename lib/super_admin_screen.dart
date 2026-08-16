@@ -1222,32 +1222,29 @@ class _NotificationsTabState extends State<_NotificationsTab> {
                       return;
                     }
                     setState(() => _isSending = true);
-                    final success = await sendOneSignalBroadcast(title: title, body: body);
-                    // حفظ الإشعار في Firestore ليظهر في نافذة إشعارات كل زبون
-                    if (success) {
-                      try {
-                        await FirebaseFirestore.instance
-                            .collection('broadcast_notifications')
-                            .add({
-                          'title': title,
-                          'body': body,
-                          'type': 'promo',
-                          'isRead': false,
-                          'createdAt': FieldValue.serverTimestamp(),
-                        });
-                      } catch (_) {}
-                    }
-                    setState(() => _isSending = false);
-                    if (context.mounted) {
-                      if (success) {
+                    try {
+                      await FirebaseFirestore.instance
+                          .collection('broadcast_notifications')
+                          .add({
+                        'title': title,
+                        'body': body,
+                        'type': 'promo',
+                        'isRead': false,
+                        'createdAt': FieldValue.serverTimestamp(),
+                      });
+                      setState(() => _isSending = false);
+                      if (context.mounted) {
                         _promoTitleCtrl.clear();
                         _promoBodyCtrl.clear();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('✅ تم إرسال العرض لجميع المستخدمين بنجاح!'), backgroundColor: Colors.green),
                         );
-                      } else {
+                      }
+                    } catch (e) {
+                      setState(() => _isSending = false);
+                      if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('❌ فشل الإرسال، تحقق من اتصال الإنترنت'), backgroundColor: Colors.red),
+                          SnackBar(content: Text('❌ فشل الإرسال: '), backgroundColor: Colors.red),
                         );
                       }
                     }
