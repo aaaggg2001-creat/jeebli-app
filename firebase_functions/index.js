@@ -31,7 +31,7 @@ async function sendPush(token, title, body, data = {}) {
       notification: { title, body },
       android: {
         priority: 'high',
-        notification: { sound: 'default', channelId: 'jeebli_orders_channel', priority: 'max', defaultVibrateTimings: true },
+        notification: { sound: 'jeebli_notification', channelId: 'jeebli_orders_v2', priority: 'max', defaultVibrateTimings: true },
       },
       data: strData,
     });
@@ -90,7 +90,7 @@ exports.onOrderStatusChange = functions.firestore.document('orders/{orderId}').o
       try {
         await messaging.sendEachForMulticast({
           tokens, notification: { title: dTitle, body: dBody },
-          android: { priority: 'high', notification: { sound: 'default', channelId: 'jeebli_orders_channel', priority: 'max' } },
+          android: { priority: 'high', notification: { sound: 'jeebli_notification', channelId: 'jeebli_orders_v2', priority: 'max' } },
           data: { orderId: ctx.params.orderId, route: 'driver_dashboard' },
         });
       } catch (e) { console.error('Driver multicast error:', e); }

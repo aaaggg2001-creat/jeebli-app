@@ -61,12 +61,14 @@ class JeebliNotificationService {
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
   // قناة FCM الرئيسية - يجب أن تطابق channelId في Cloud Functions
+  // v2 = صوت مخصص جيبلي
   static const _fcmChannel = AndroidNotificationChannel(
-    'jeebli_orders_channel',
+    'jeebli_orders_v2',
     'طلبات جيبلي',
     description: 'إشعارات الطلبات والتوصيل - عالية الأهمية',
     importance: Importance.max,
     playSound: true,
+    sound: RawResourceAndroidNotificationSound('jeebli_notification'),
     enableVibration: true,
     showBadge: true,
     enableLights: true,
@@ -75,11 +77,12 @@ class JeebliNotificationService {
 
   // قناة الإشعارات المحلية
   static const _localChannel = AndroidNotificationChannel(
-    'jeebli_alerts_v1',
+    'jeebli_alerts_v2',
     'إشعارات جيبلي الهامة',
     description: 'إشعارات الطلبات والتوصيل',
     importance: Importance.max,
     playSound: true,
+    sound: RawResourceAndroidNotificationSound('jeebli_notification'),
     enableVibration: true,
     showBadge: true,
     enableLights: true,
@@ -102,13 +105,14 @@ class JeebliNotificationService {
     int id = 1,
   }) async {
     final androidDetails = AndroidNotificationDetails(
-      'jeebli_orders_channel', // استخدام نفس القناة التي يرسل إليها FCM
+      'jeebli_orders_v2', // القناة الجديدة مع الصوت المخصص
       'طلبات جيبلي',
       channelDescription: 'إشعارات الطلبات والتوصيل',
       importance: Importance.max,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
       playSound: true,
+      sound: const RawResourceAndroidNotificationSound('jeebli_notification'),
       enableVibration: true,
       autoCancel: false,
       color: const Color(0xFFFF8F00),

@@ -53,7 +53,7 @@
         <!-- ─── FCM: قناة الإشعارات الافتراضية بأعلى أهمية ─────── -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="jeebli_orders_channel" />
+            android:value="jeebli_orders_v2" />
 
         <!-- ─── FCM: أيقونة الإشعار الافتراضية ─────────────────── -->
         <meta-data
