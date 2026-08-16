@@ -32,11 +32,6 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Deploy Firestore Rules & Functions
-        run: |
-          npm install -g firebase-tools
-          cd firebase_functions && npm install && cd ..
-          firebase deploy --only firestore:rules,functions --project jeebli-app --token "${{ secrets.FIREBASE_TOKEN }}" || true
 
       - name: Build APK
         run: flutter build apk --release
@@ -53,11 +48,11 @@ jobs:
           tag_name: latest
           name: "جيب لي - آخر إصدار"
           body: |
-            ## تحديث تلقائي 🚀
-            - نظام إشعارات جديد كلياً (Clean Slate)
-            - يعتمد على OneSignal v5 فقط
-            - سجل إشعارات دائم عبر Firestore StreamBuilder
-            - يعمل حتى لو التطبيق مغلق تماماً
+            ## تحديث 🚀
+            - واجهة لوحة تحكم صاحب المطعم محسّنة
+            - إصلاح عرض صور المنتجات من جميع المصادر
+            - نظام عروض ترويجية جماعية للسوبر أدمن
+            - صوت إشعارات مخصص وحصري لجيبلي
           files: build/app/outputs/flutter-apk/app-release.apk
           make_latest: true
         env:

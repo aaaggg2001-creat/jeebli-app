@@ -10737,15 +10737,6 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
             .snapshots(),
         builder: (context, snapshot) {
           final docs = snapshot.data?.docs ?? [];
-          final totalSales = docs.fold(
-            0.0,
-            (acc, doc) =>
-                acc +
-                (((doc.data() as Map<String, dynamic>)['totalAmount'] as num?)
-                        ?.toDouble() ??
-                    0.0),
-          );
-          final orderCount = docs.length;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
