@@ -43,3 +43,15 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Node.js / Firebase Functions
+node_modules/
+firebase_functions/node_modules/
+npm-debug.log*
+
+# Downloaded media files (temp)
+*.webm
+*.part
+
+# Google Services - keep in repo
+# google-services.json

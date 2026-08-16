@@ -98,3 +98,40 @@ exports.onOrderStatusChange = functions.firestore.document('orders/{orderId}').o
     }
   }
 });
+
+exports.onPromoBroadcast = functions.firestore.document('broadcast_notifications/{docId}').onCreate(async (snap, ctx) => {
+  const data = snap.data();
+  const title = data.title || 'عرض خاص!';
+  const body = data.body || '';
+  
+  const tokensSnap = await db.collection('fcm_tokens').get();
+  const tokens = [];
+  const uids = [];
+  tokensSnap.forEach(doc => { 
+    if (doc.data().token) { 
+      tokens.push(doc.data().token); 
+      uids.push(doc.id); 
+    } 
+  });
+  
+  if (tokens.length > 0) {
+    try {
+      // Chunk tokens into arrays of 500 (FCM limit for multicast)
+      const chunkSize = 500;
+      for (let i = 0; i < tokens.length; i += chunkSize) {
+        const chunk = tokens.slice(i, i + chunkSize);
+        await messaging.sendEachForMulticast({
+          tokens: chunk,
+          notification: { title, body },
+          android: { priority: 'high', notification: { sound: 'jeebli_notification', channelId: 'jeebli_orders_v2', priority: 'max' } },
+          data: { route: 'home' },
+        });
+      }
+    } catch (e) { console.error('Promo multicast error:', e); }
+    
+    // Save to all notification histories
+    for (const uid of uids) {
+      await saveNotif(uid, title, body, false, false, '');
+    }
+  }
+});
