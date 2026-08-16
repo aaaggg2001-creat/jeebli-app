@@ -1,13 +1,16 @@
-﻿/**
+/**
  * Firebase Cloud Functions - جيبلي ديلفري
  */
 
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-admin.initializeApp();
+const functions = require('firebase-functions/v1');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getMessaging } = require('firebase-admin/messaging');
 
-const db = admin.firestore();
-const messaging = admin.messaging();
+initializeApp();
+
+const db = getFirestore();
+const messaging = getMessaging();
 
 async function getTokenForDevice(deviceUid) {
   if (!deviceUid) return null;
@@ -41,7 +44,7 @@ async function saveNotif(deviceUid, title, message, isWarning = false, isOwner =
   try {
     await db.collection('notification_history').doc(deviceUid).collection('items').add({
       title, message, isWarning, isOwnerNotification: isOwner, isRead: false, orderId,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     });
   } catch (e) { console.error('saveNotif error:', e); }
 }

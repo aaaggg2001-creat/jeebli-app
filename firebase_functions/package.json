@@ -1,8 +1,16 @@
 {
   "name": "jeebli-functions",
   "description": "Jeebli Delivery Firebase Cloud Functions",
-  "scripts": { "serve": "firebase emulators:start --only functions", "deploy": "firebase deploy --only functions" },
-  "engines": { "node": "20" },
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions"
+  },
+  "engines": {
+    "node": "20"
+  },
   "main": "index.js",
-  "dependencies": { "firebase-admin": "^12.0.0", "firebase-functions": "^5.0.0" }
+  "dependencies": {
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
+  }
 }
