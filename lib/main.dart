@@ -18,6 +18,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_storage/firebase_storage.dart';
 import 'super_admin_screen.dart';
 
 // ─── OneSignal Config ──────────────────────────────────────────────────────
@@ -13481,6 +13482,48 @@ void _showUrlInputDialog(
 Future<String?> _showImagePickerChoice(BuildContext context) async {
   final picker = ImagePicker();
 
+  // دالة مساعدة لرفع الصورة إلى Firebase Storage وإرجاع الرابط
+  Future<String?> uploadToStorage(XFile file, BuildContext ctx) async {
+    try {
+      // عرض مؤشر التحميل
+      if (ctx.mounted) {
+        showDialog(
+          context: ctx,
+          barrierDismissible: false,
+          builder: (_) => const Center(
+            child: Card(
+              color: Color(0xFF1E293B),
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Color(0xFFFF8F00)),
+                    SizedBox(height: 12),
+                    Text('جاري رفع الصورة...', style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      final bytes = await file.readAsBytes();
+      final fileName = 'products/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final ref = FirebaseStorage.instance.ref().child(fileName);
+      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+      final downloadUrl = await ref.getDownloadURL();
+
+      if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop(); // إغلاق مؤشر التحميل
+      return downloadUrl;
+    } catch (e) {
+      debugPrint('Storage upload error: $e');
+      if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop();
+      return null;
+    }
+  }
+
   final result = await showModalBottomSheet<String>(
     context: context,
     backgroundColor: const Color(0xFF1E293B),
@@ -13497,71 +13540,51 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
             Text(
               'اختر مصدر الصورة 📸',
               style: TextStyle(
-                color: context.dynamicWhite,
+                color: ctx.dynamicWhite,
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
             ),
             const SizedBox(height: 16),
             ListTile(
-              leading: Icon(
+              leading: const Icon(
                 Icons.photo_library_rounded,
                 color: Colors.amber,
                 size: 28,
               ),
               title: Text(
                 'اختيار من المعرض (الاستوديو) 🖼️',
-                style: TextStyle(color: context.dynamicWhite, fontSize: 14),
+                style: TextStyle(color: ctx.dynamicWhite, fontSize: 14),
               ),
               onTap: () async {
-                final file = await picker.pickImage(
-                  source: ImageSource.gallery,
-                  maxWidth: 800,
-                  maxHeight: 800,
-                );
-                if (file != null) {
-                  final bytes = await file.readAsBytes();
-                  if (ctx.mounted) Navigator.pop(ctx, 'data:image/jpeg;base64,${base64Encode(bytes)}');
-                } else {
-                  if (ctx.mounted) Navigator.pop(ctx, null);
-                }
+                Navigator.pop(ctx, 'GALLERY');
               },
             ),
             const Divider(color: Colors.white12),
             ListTile(
-              leading: Icon(
+              leading: const Icon(
                 Icons.camera_alt_rounded,
                 color: Colors.greenAccent,
                 size: 28,
               ),
               title: Text(
                 'التقاط مباشرة بواسطة الكاميرا 📸',
-                style: TextStyle(color: context.dynamicWhite, fontSize: 14),
+                style: TextStyle(color: ctx.dynamicWhite, fontSize: 14),
               ),
               onTap: () async {
-                final file = await picker.pickImage(
-                  source: ImageSource.camera,
-                  maxWidth: 800,
-                  maxHeight: 800,
-                );
-                if (file != null) {
-                  final bytes = await file.readAsBytes();
-                  if (ctx.mounted) Navigator.pop(ctx, 'data:image/jpeg;base64,${base64Encode(bytes)}');
-                } else {
-                  if (ctx.mounted) Navigator.pop(ctx, null);
-                }
+                Navigator.pop(ctx, 'CAMERA');
               },
             ),
             const Divider(color: Colors.white12),
             ListTile(
-              leading: Icon(
+              leading: const Icon(
                 Icons.link_rounded,
                 color: Colors.lightBlueAccent,
                 size: 28,
               ),
               title: Text(
                 'إدخال رابط URL من الإنترنت 🌐',
-                style: TextStyle(color: context.dynamicWhite, fontSize: 14),
+                style: TextStyle(color: ctx.dynamicWhite, fontSize: 14),
               ),
               onTap: () {
                 Navigator.pop(ctx, 'USE_URL');
@@ -13577,7 +13600,31 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
     return await _showUrlInputDialogAsync(context);
   }
 
-  return result;
+  if (result == 'CAMERA') {
+    final file = await picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 85,
+    );
+    if (file != null && context.mounted) {
+      return await uploadToStorage(file, context);
+    }
+  }
+
+  if (result == 'GALLERY') {
+    final file = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 85,
+    );
+    if (file != null && context.mounted) {
+      return await uploadToStorage(file, context);
+    }
+  }
+
+  return null;
 }
 
 Future<String?> _showUrlInputDialogAsync(BuildContext context) async {
