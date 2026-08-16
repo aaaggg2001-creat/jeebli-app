@@ -60,7 +60,21 @@ class JeebliNotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
-  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+  // قناة FCM الرئيسية - يجب أن تطابق channelId في Cloud Functions
+  static const _fcmChannel = AndroidNotificationChannel(
+    'jeebli_orders_channel',
+    'طلبات جيبلي',
+    description: 'إشعارات الطلبات والتوصيل - عالية الأهمية',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+    showBadge: true,
+    enableLights: true,
+    ledColor: Color(0xFFFF8F00),
+  );
+
+  // قناة الإشعارات المحلية
+  static const _localChannel = AndroidNotificationChannel(
     'jeebli_alerts_v1',
     'إشعارات جيبلي الهامة',
     description: 'إشعارات الطلبات والتوصيل',
@@ -76,9 +90,10 @@ class JeebliNotificationService {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidInit);
     await _plugin.initialize(initSettings);
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    // إنشاء كلا القناتين
+    await android?.createNotificationChannel(_fcmChannel);
+    await android?.createNotificationChannel(_localChannel);
   }
 
   Future<void> show({
@@ -87,8 +102,8 @@ class JeebliNotificationService {
     int id = 1,
   }) async {
     final androidDetails = AndroidNotificationDetails(
-      'jeebli_alerts_v1',
-      'إشعارات جيبلي الهامة',
+      'jeebli_orders_channel', // استخدام نفس القناة التي يرسل إليها FCM
+      'طلبات جيبلي',
       channelDescription: 'إشعارات الطلبات والتوصيل',
       importance: Importance.max,
       priority: Priority.high,
@@ -128,6 +143,19 @@ void main() async {
     // ── تهيئة نظام الإشعارات ──────────────────────────────────────
 
     await _localNotif.initialize();
+
+    // ── معالج إشعارات FCM في الواجهة الأمامية ──────────────────────
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      final notification = message.notification;
+      if (notification != null) {
+        await _localNotif.show(
+          title: notification.title ?? '🔔 إشعار جديد',
+          body: notification.body ?? '',
+          id: DateTime.now().millisecondsSinceEpoch % 100000,
+        );
+      }
+    });
+
   } catch (e) {
     debugPrint('Firebase init note: $e');
   }
