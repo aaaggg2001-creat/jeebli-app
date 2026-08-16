@@ -6527,8 +6527,6 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                   width: 88,
                                   height: 88,
                                   fit: BoxFit.cover,
-                                  
-                                  ),
                                 ),
                               ),
                               if (!prod.isAvailable)

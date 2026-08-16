@@ -281,10 +281,7 @@ class _RestaurantsTab extends StatelessWidget {
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: CustomAppImage(imageUrl: rest.imageUrl,
-                  width: 50, height: 50, fit: BoxFit.cover,
-                  errorBuilder: (ctx2, err, stack) =>
-                      Container(width: 50, height: 50, color: Colors.grey[800],
-                          child: const Icon(Icons.store, color: Colors.grey))),
+                  width: 50, height: 50, fit: BoxFit.cover),
             ),
             title: Text(rest.name,
                 style: const TextStyle(
@@ -806,11 +803,7 @@ class _ProductsTab extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: CustomAppImage(imageUrl: prod.imageUrl,
-                  width: 48, height: 48, fit: BoxFit.cover,
-                  errorBuilder: (ctx2, err, stack) => Container(
-                      width: 48, height: 48,
-                      color: Colors.grey[800],
-                      child: const Icon(Icons.fastfood, color: Colors.grey))),
+                  width: 48, height: 48, fit: BoxFit.cover),
             ),
             if (hasDiscount)
               Positioned(
