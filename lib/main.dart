@@ -10918,15 +10918,6 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
             .snapshots(),
         builder: (context, snapshot) {
           final docs = snapshot.data?.docs ?? [];
-          final totalSales = docs.fold(
-            0.0,
-            (acc, doc) =>
-                acc +
-                (((doc.data() as Map<String, dynamic>)['totalAmount'] as num?)
-                        ?.toDouble() ??
-                    0.0),
-          );
-          final orderCount = docs.length;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -10973,28 +10964,7 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
                 ],
               ),
               const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _analyticsItem(
-                      'إجمالي مبيعاتك',
-                      '${totalSales.toStringAsFixed(0)} د.ع',
-                      Icons.payments_outlined,
-                      Colors.greenAccent,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _analyticsItem(
-                      'الطلبات الناجحة',
-                      '$orderCount طلب',
-                      Icons.shopping_bag_outlined,
-                      Colors.amber,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
