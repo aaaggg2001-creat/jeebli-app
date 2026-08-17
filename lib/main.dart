@@ -59,11 +59,12 @@ Future<String> sendOneSignalPushWithResponse({
         'headings': {'en': title, 'ar': title},
         'contents': {'en': body, 'ar': body},
         'priority': 10,
+        'isAndroid': true,
+        'isIos': true,
         'android_accent_color': 'FFFF8F00',
         'android_visibility': 1,
         'existing_android_channel_id': 'jeebli_alerts_v1',
         'android_channel_id': 'jeebli_alerts_v1',
-        'content_available': true,
         'data': data,
       }),
     );
@@ -75,7 +76,6 @@ Future<String> sendOneSignalPushWithResponse({
     return 'error: $e';
   }
 }
-
 
 /// ─── إرسال إشعار ترويجي لجميع مستخدمي التطبيق ────────────────────────────
 Future<bool> sendOneSignalBroadcast({
@@ -95,11 +95,12 @@ Future<bool> sendOneSignalBroadcast({
         'headings': {'en': title, 'ar': title},
         'contents': {'en': body, 'ar': body},
         'priority': 10,
+        'isAndroid': true,
+        'isIos': true,
         'android_accent_color': 'FFFF8F00',
         'android_visibility': 1,
         'existing_android_channel_id': 'jeebli_alerts_v1',
         'android_channel_id': 'jeebli_alerts_v1',
-        'content_available': true,
         'data': {'screen': 'promo'},
       }),
     );
