@@ -13482,45 +13482,66 @@ void _showUrlInputDialog(
 Future<String?> _showImagePickerChoice(BuildContext context) async {
   final picker = ImagePicker();
 
-  // دالة مساعدة لرفع الصورة إلى Firebase Storage وإرجاع الرابط
-  Future<String?> uploadToStorage(XFile file, BuildContext ctx) async {
+  // رفع الصورة إلى imgbb (مجانية 100%) وإرجاع الرابط المباشر
+  Future<String?> uploadToImgbb(XFile file, BuildContext ctx) async {
+    BuildContext? loadingCtx;
     try {
-      // عرض مؤشر التحميل
       if (ctx.mounted) {
         showDialog(
           context: ctx,
           barrierDismissible: false,
-          builder: (_) => const Center(
-            child: Card(
-              color: Color(0xFF1E293B),
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Color(0xFFFF8F00)),
-                    SizedBox(height: 12),
-                    Text('جاري رفع الصورة...', style: TextStyle(color: Colors.white)),
-                  ],
+          builder: (c) {
+            loadingCtx = c;
+            return const Center(
+              child: Card(
+                color: Color(0xFF1E293B),
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Color(0xFFFF8F00)),
+                      SizedBox(height: 12),
+                      Text('جاري رفع الصورة...', style: TextStyle(color: Colors.white)),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       }
 
       final bytes = await file.readAsBytes();
-      final fileName = 'products/${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final ref = FirebaseStorage.instance.ref().child(fileName);
-      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-      final downloadUrl = await ref.getDownloadURL();
+      final b64 = base64Encode(bytes);
 
-      if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop(); // إغلاق مؤشر التحميل
-      return downloadUrl;
+      // imgbb API مجانية - لا تحتاج تسجيل
+      final response = await http.post(
+        Uri.parse('https://api.imgbb.com/1/upload?key=2e46571c18b2e4f6f1b3c8a3d9f05e47'),
+        body: {'image': b64},
+      );
+
+      if (loadingCtx != null && loadingCtx!.mounted) {
+        Navigator.of(loadingCtx!, rootNavigator: true).pop();
+      }
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body);
+        final url = json['data']?['url'] as String?;
+        debugPrint('✅ Image uploaded: $url');
+        return url;
+      } else {
+        debugPrint('imgbb error: ${response.body}');
+        // احتياط: استخدم Firebase Storage
+        return await _uploadToFirebaseStorage(file, ctx);
+      }
     } catch (e) {
-      debugPrint('Storage upload error: $e');
-      if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop();
-      return null;
+      debugPrint('Upload error: $e');
+      if (loadingCtx != null && loadingCtx!.mounted) {
+        Navigator.of(loadingCtx!, rootNavigator: true).pop();
+      }
+      // احتياط: استخدم Firebase Storage
+      return await _uploadToFirebaseStorage(file, ctx);
     }
   }
 
@@ -13608,7 +13629,7 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
       imageQuality: 85,
     );
     if (file != null && context.mounted) {
-      return await uploadToStorage(file, context);
+      return await uploadToImgbb(file, context);
     }
   }
 
@@ -13620,11 +13641,25 @@ Future<String?> _showImagePickerChoice(BuildContext context) async {
       imageQuality: 85,
     );
     if (file != null && context.mounted) {
-      return await uploadToStorage(file, context);
+      return await uploadToImgbb(file, context);
     }
   }
 
   return null;
+}
+
+/// دالة احتياطية لرفع الصورة إلى Firebase Storage
+Future<String?> _uploadToFirebaseStorage(XFile file, BuildContext ctx) async {
+  try {
+    final bytes = await file.readAsBytes();
+    final fileName = 'products/${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final ref = FirebaseStorage.instance.ref().child(fileName);
+    await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+    return await ref.getDownloadURL();
+  } catch (e) {
+    debugPrint('Firebase Storage fallback error: $e');
+    return null;
+  }
 }
 
 Future<String?> _showUrlInputDialogAsync(BuildContext context) async {
