@@ -1945,6 +1945,7 @@ class JeebliController extends ChangeNotifier {
     String? imageUrl,
     int? openHour,
     int? closeHour,
+    List<String>? customCategories,
   }) {
     final idx = _restaurants.indexWhere((r) => r.id == restaurantId);
     if (idx >= 0) {
@@ -1966,6 +1967,7 @@ class JeebliController extends ChangeNotifier {
         ownerPhone: r.ownerPhone,
         openHour: openHour ?? r.openHour,
         closeHour: closeHour ?? r.closeHour,
+        customCategories: customCategories ?? r.customCategories,
       );
       try {
         FirebaseFirestore.instance
@@ -11431,7 +11433,7 @@ void _showOwnerEditRestaurantDialog(
                       const SizedBox(width: 6),
                       IconButton(
                         onPressed: () async {
-                          final newUrl = await _showImagePickerChoice(context);
+                          final newUrl = await showImagePickerChoiceGlobal(context);
                           if (newUrl != null && newUrl.isNotEmpty) {
                             setState(() => imgCtrl.text = newUrl);
                           }
@@ -11720,7 +11722,7 @@ void _showOwnerProductDialog(
                       const SizedBox(width: 6),
                       IconButton(
                         onPressed: () async {
-                          final newUrl = await _showImagePickerChoice(context);
+                          final newUrl = await showImagePickerChoiceGlobal(context);
                           if (newUrl != null && newUrl.isNotEmpty) {
                             setState(() => imageController.text = newUrl);
                           }
@@ -11824,10 +11826,16 @@ void _showOwnerProductDialog(
                                 ElevatedButton(
                                   onPressed: () {
                                     if (newCategoryController.text.trim().isNotEmpty) {
+                                      final newCat = newCategoryController.text.trim();
                                       setState(() {
-                                        allowedCategories.add(newCategoryController.text.trim());
-                                        selectedCategory = newCategoryController.text.trim();
+                                        if (!allowedCategories.contains(newCat)) {
+                                          allowedCategories.add(newCat);
+                                        }
+                                        selectedCategory = newCat;
                                       });
+                                      if (restId.isNotEmpty) {
+                                        ctrl.updateRestaurantDetails(restId, customCategories: allowedCategories);
+                                      }
                                     }
                                     Navigator.pop(ctx2);
                                   },
@@ -11837,6 +11845,52 @@ void _showOwnerProductDialog(
                             ),
                           );
                         },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 28),
+                        tooltip: 'حذف القسم المحدد',
+                        onPressed: () {
+                          if (allowedCategories.length <= 1) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('لا يمكن حذف القسم الأخير!'), backgroundColor: Colors.red)
+                            );
+                            return;
+                          }
+                          showDialog(
+                            context: context,
+                            builder: (ctx3) => Directionality(
+                              textDirection: TextDirection.rtl,
+                              child: AlertDialog(
+                                backgroundColor: const Color(0xFF1E293B),
+                                title: const Text('تأكيد الحذف ⚠️', style: TextStyle(color: Colors.redAccent)),
+                                content: Text(
+                                  'هل أنت متأكد من حذف قسم "$selectedCategory"؟\n\nتنبيه: إذا قمت بحذفه، ستبقى الوجبات التابعة له موجودة ولكن قد لا تظهر في الأقسام بشكل صحيح للزبائن!',
+                                  style: const TextStyle(color: Colors.white)
+                                ),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx3), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                                    onPressed: () {
+                                      setState(() {
+                                        allowedCategories.remove(selectedCategory);
+                                        selectedCategory = allowedCategories.first;
+                                      });
+                                      if (restId.isNotEmpty) {
+                                        ctrl.updateRestaurantDetails(restId, customCategories: allowedCategories);
+                                      }
+                                      Navigator.pop(ctx3);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('تم حذف القسم بنجاح'), backgroundColor: Colors.green)
+                                      );
+                                    },
+                                    child: const Text('نعم، احذف', style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
                       ),
                     ],
                   ),
@@ -13520,7 +13574,7 @@ void _showUrlInputDialog(
   );
 }
 
-Future<String?> _showImagePickerChoice(BuildContext context) async {
+Future<String?> showImagePickerChoiceGlobal(BuildContext context) async {
   final picker = ImagePicker();
 
   // رفع الصورة إلى imgbb (مجانية 100%) وإرجاع الرابط المباشر

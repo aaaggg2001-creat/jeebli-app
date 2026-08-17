@@ -469,7 +469,7 @@ class _RestaurantsTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 _darkField('أنواع الوجبات (مثل: برجر • شاورما)', cuisineC, Icons.restaurant_menu),
-                _darkField('رابط صورة المطعم', imgC, Icons.image_outlined),
+                _imageField(ctx, 'صورة اللوجو (التقاط / معرض / رابط)', imgC),
                 _darkField('وصف قصير للمطعم', descC, Icons.description_outlined),
                 _darkField('رقم الواتساب (07XXXXXXXXX)', waC, Icons.phone),
                 _darkField('رقم هاتف المالك', ownerPhoneC, Icons.person_outline),
@@ -674,6 +674,46 @@ class _RestaurantsTab extends StatelessWidget {
               child: const Text('حفظ', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _imageField(BuildContext context, String label, TextEditingController c) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: c,
+        style: const TextStyle(color: Colors.white, fontSize: 13),
+        keyboardType: TextInputType.url,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: Colors.grey, fontSize: 12),
+          prefixIcon: const Icon(Icons.image_outlined, color: Colors.amber, size: 18),
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.camera_alt_outlined, color: Colors.amber),
+            tooltip: 'رفع صورة (كاميرا / معرض / رابط)',
+            onPressed: () async {
+              final newUrl = await showImagePickerChoiceGlobal(context);
+              if (newUrl != null && newUrl.isNotEmpty) {
+                c.text = newUrl;
+              }
+            },
+          ),
+          filled: true,
+          fillColor: Colors.white.withOpacity(0.05),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Colors.amber),
+          ),
         ),
       ),
     );
@@ -954,7 +994,7 @@ class _ProductsTab extends StatelessWidget {
                   _darkFieldLocal('اسم الوجبة *', nameC, Icons.fastfood),
                   _darkFieldLocal('وصف الوجبة والمكونات', descC, Icons.description_outlined),
                   _darkFieldLocal('السعر الأصلي (د.ع) *', priceC, Icons.attach_money),
-                  _darkFieldLocal('رابط صورة الوجبة (اختياري)', imgC, Icons.image_outlined),
+                  _imageField(ctx, 'رابط صورة الوجبة (اختياري)', imgC),
                   const SizedBox(height: 20),
                   Row(
                     children: [
@@ -1026,7 +1066,7 @@ class _ProductsTab extends StatelessWidget {
                 _darkFieldLocal('الوصف والمكونات', descC, Icons.description_outlined),
                 _darkFieldLocal('السعر الأصلي (د.ع)', priceC, Icons.attach_money),
                 _darkFieldLocal('سعر التخفيض (اتركه فارغاً لإلغاء التخفيض)', discountC, Icons.local_offer_outlined),
-                _darkFieldLocal('رابط الصورة الجديد', imgC, Icons.image_outlined),
+                _imageField(ctx, 'رابط الصورة الجديد (التقاط / معرض / رابط)', imgC),
                 const SizedBox(height: 20),
                 Row(
                   children: [
@@ -1061,6 +1101,46 @@ class _ProductsTab extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _imageField(BuildContext context, String label, TextEditingController c) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: c,
+        style: const TextStyle(color: Colors.white, fontSize: 13),
+        keyboardType: TextInputType.url,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: Colors.grey, fontSize: 12),
+          prefixIcon: const Icon(Icons.image_outlined, color: Colors.amber, size: 18),
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.camera_alt_outlined, color: Colors.amber),
+            tooltip: 'رفع صورة (كاميرا / معرض / رابط)',
+            onPressed: () async {
+              final newUrl = await showImagePickerChoiceGlobal(context);
+              if (newUrl != null && newUrl.isNotEmpty) {
+                c.text = newUrl;
+              }
+            },
+          ),
+          filled: true,
+          fillColor: Colors.white.withOpacity(0.05),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Colors.amber),
           ),
         ),
       ),
