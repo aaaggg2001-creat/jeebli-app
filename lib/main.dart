@@ -2264,6 +2264,33 @@ class JeebliController extends ChangeNotifier {
       _cartItems.add(CartItem(product: product));
     }
     playFeedbackSound();
+    
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'تمت الإضافة للسلة: ${product.name}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+        backgroundColor: Colors.green.shade600,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        margin: const EdgeInsets.only(bottom: 70, left: 16, right: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+    
     notifyListeners();
   }
 
@@ -6193,6 +6220,108 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 /// ============================================================================
 /// 7. شاشة منيو المطعم
 
+class AddToCartAnimatedButton extends StatefulWidget {
+  final VoidCallback onPressed;
+
+  const AddToCartAnimatedButton({
+    super.key,
+    required this.onPressed,
+  });
+
+  @override
+  State<AddToCartAnimatedButton> createState() => _AddToCartAnimatedButtonState();
+}
+
+class _AddToCartAnimatedButtonState extends State<AddToCartAnimatedButton>
+    with SingleTickerProviderStateMixin {
+  bool _isAdded = false;
+  late AnimationController _animController;
+  late Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    super.dispose();
+  }
+
+  void _handlePress() async {
+    if (_isAdded) return;
+
+    // تشغيل الأنيميشن للصغار ثم الكبر
+    await _animController.forward();
+    await _animController.reverse();
+
+    widget.onPressed();
+
+    setState(() {
+      _isAdded = true;
+    });
+
+    // إرجاع الزر لشكله الطبيعي بعد ثانية ونصف
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        setState(() {
+          _isAdded = false;
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _scaleAnimation,
+      builder: (context, child) => Transform.scale(
+        scale: _scaleAnimation.value,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          child: ElevatedButton.icon(
+            onPressed: _handlePress,
+            icon: Icon(
+              _isAdded ? Icons.check_circle : Icons.add_shopping_cart,
+              size: 13,
+            ),
+            label: Text(
+              _isAdded ? 'أُضيف' : 'أضف',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isAdded ? Colors.green : const Color(0xFFFF8F00),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 6,
+              ),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// ============================================================================
 
 class RestaurantMenuScreen extends StatefulWidget {
@@ -6633,39 +6762,9 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
                                       ],
                                     ),
                                     if (prod.isAvailable)
-                                      ElevatedButton.icon(
+                                      AddToCartAnimatedButton(
                                         onPressed: () =>
                                             controller.addToCart(prod, context),
-                                        icon: Icon(
-                                          Icons.add_shopping_cart,
-                                          size: 13,
-                                        ),
-                                        label: Text(
-                                          'أضف',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(
-                                            0xFFFF8F00,
-                                          ),
-                                          foregroundColor: context.dynamicWhite,
-                                          elevation: 0,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 6,
-                                          ),
-                                          minimumSize: Size.zero,
-                                          tapTargetSize:
-                                              MaterialTapTargetSize.shrinkWrap,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              10,
-                                            ),
-                                          ),
-                                        ),
                                       )
                                     else
                                       Container(
