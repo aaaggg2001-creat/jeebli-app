@@ -2149,6 +2149,7 @@ class JeebliController extends ChangeNotifier {
         price: price,
         discountPrice: discountPrice,
         imageUrl: imageUrl,
+        categoryId: categoryId,
         isAvailable: isAvailable,
         clearDiscount: clearDiscount,
       );
@@ -6286,15 +6287,6 @@ class _RestaurantMenuScreenState extends State<RestaurantMenuScreen> {
       for (var c in rest.customCategories) {
         cats.add(Category(id: c, name: c, icon: Icons.fastfood));
       }
-    } else {
-      // Fallback
-      cats.addAll([
-        Category(id: 'burger', name: 'برجر', icon: Icons.lunch_dining),
-        Category(id: 'zinger', name: 'زنجر', icon: Icons.restaurant),
-        Category(id: 'pizza', name: 'بيتزا', icon: Icons.local_pizza),
-        Category(id: 'shawarma', name: 'شاورما', icon: Icons.flatware),
-        Category(id: 'fries', name: 'فنجر', icon: Icons.fastfood),
-      ]);
     }
     return cats;
   }
@@ -9144,6 +9136,8 @@ class RestaurantOwnerAdminScreen extends StatefulWidget {
 }
 
 class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen> {
+  String _ownerSelectedCategory = 'الكل';
+
 
   @override
   Widget build(BuildContext context) {
@@ -11079,7 +11073,24 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
     String restId,
     String title,
   ) {
-    final prods = ctrl.getProductsByRestaurant(restId);
+    final rest = ctrl.allRestaurants.firstWhere((r) => r.id == restId, orElse: () => ctrl.activeRestaurant!);
+    List<Category> cats = [Category(id: 'all', name: 'الكل', icon: Icons.grid_view_rounded)];
+    if (rest.customCategories.isNotEmpty) {
+      for (var c in rest.customCategories) {
+        cats.add(Category(id: c, name: c, icon: Icons.fastfood));
+      }
+    }
+
+    List<Product> prods = ctrl.getProductsByRestaurant(restId);
+    if (_ownerSelectedCategory != 'الكل') {
+      prods = prods.where((p) => p.categoryId == _ownerSelectedCategory ||
+                         (p.categoryId == 'burger' && _ownerSelectedCategory == 'برجر') ||
+                         (p.categoryId == 'pizza' && _ownerSelectedCategory == 'بيتزا') ||
+                         (p.categoryId == 'fries' && _ownerSelectedCategory == 'فنجر') ||
+                         (p.categoryId == 'shawarma' && _ownerSelectedCategory == 'شاورما')
+                         ).toList();
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -11094,6 +11105,50 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
             ),
           ),
         ),
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: cats.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (ctx, i) {
+              final cat = cats[i];
+              final isSel = _ownerSelectedCategory == cat.id || (_ownerSelectedCategory == 'الكل' && cat.id == 'all');
+              return InkWell(
+                onTap: () {
+                  setState(() {
+                    _ownerSelectedCategory = cat.id == 'all' ? 'الكل' : cat.id;
+                  });
+                },
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isSel ? Colors.amber : const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: isSel ? Colors.amber : Colors.white12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(cat.icon, size: 16, color: isSel ? Colors.black : Colors.white70),
+                      const SizedBox(width: 6),
+                      Text(
+                        cat.name,
+                        style: TextStyle(
+                          color: isSel ? Colors.black : Colors.white70,
+                          fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
             color: const Color(0xFF1E293B),
@@ -11644,6 +11699,7 @@ void _showOwnerProductDialog(
   JeebliController ctrl,
   String restId, {
   Product? product,
+  String? initialCategory,
 }) {
   final isEdit = product != null;
   final nameController = TextEditingController(text: product?.name ?? '');
@@ -11665,14 +11721,19 @@ void _showOwnerProductDialog(
   );
 
   final rest = ctrl.activeRestaurant;
-  List<String> allowedCategories = rest?.customCategories.isNotEmpty == true 
-      ? rest!.customCategories 
-      : ['برجر', 'بيتزا', 'شاورما', 'مشروبات', 'أخرى'];
+  List<String> allowedCategories = List<String>.from(rest?.customCategories ?? []);
       
-  String selectedCategory = product?.categoryId ?? allowedCategories.first;
-  if (!allowedCategories.contains(selectedCategory) && product != null && product.categoryId.isNotEmpty) {
-    allowedCategories.add(product.categoryId);
-    selectedCategory = product.categoryId;
+  String? selectedCategory = product?.categoryId;
+  if (selectedCategory == null || selectedCategory.isEmpty) {
+    if (initialCategory != null && initialCategory != 'الكل') {
+      selectedCategory = initialCategory;
+    } else if (allowedCategories.isNotEmpty) {
+      selectedCategory = allowedCategories.first;
+    }
+  }
+  
+  if (selectedCategory != null && selectedCategory.isNotEmpty && !allowedCategories.contains(selectedCategory)) {
+    allowedCategories.add(selectedCategory);
   }
   
   final newCategoryController = TextEditingController();
@@ -11924,6 +11985,7 @@ void _showOwnerProductDialog(
                       discountPrice: discount,
                       description: descController.text.trim(),
                       imageUrl: imageUrl,
+                      categoryId: selectedCategory ?? '',
                       clearDiscount: discountController.text.isEmpty,
                     );
                   } else {
@@ -11931,7 +11993,7 @@ void _showOwnerProductDialog(
                       Product(
                         id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
                         restaurantId: restId,
-                        categoryId: selectedCategory,
+                        categoryId: selectedCategory ?? '',
                         name: nameController.text.trim(),
                         description: descController.text.trim(),
                         price: price,
