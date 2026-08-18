@@ -11073,7 +11073,9 @@ class _RestaurantOwnerAdminScreenState extends State<RestaurantOwnerAdminScreen>
     String restId,
     String title,
   ) {
-    final rest = ctrl.allRestaurants.firstWhere((r) => r.id == restId, orElse: () => ctrl.activeRestaurant!);
+    final restMatches = ctrl.allRestaurants.where((r) => r.id == restId).toList();
+    if (restMatches.isEmpty) return const SizedBox.shrink();
+    final rest = restMatches.first;
     List<Category> cats = [Category(id: 'all', name: 'الكل', icon: Icons.grid_view_rounded)];
     if (rest.customCategories.isNotEmpty) {
       for (var c in rest.customCategories) {
@@ -11720,7 +11722,8 @@ void _showOwnerProductDialog(
         : '',
   );
 
-  final rest = ctrl.activeRestaurant;
+  final restList = ctrl.allRestaurants.where((r) => r.id == restId).toList();
+  final rest = restList.isNotEmpty ? restList.first : null;
   List<String> allowedCategories = List<String>.from(rest?.customCategories ?? []);
       
   String? selectedCategory = product?.categoryId;
