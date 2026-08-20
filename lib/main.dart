@@ -11696,6 +11696,368 @@ void _showOwnerEditRestaurantDialog(
   );
 }
 
+// ── Widget داخلي لنافذة إضافة/تعديل الوجبة ──────────────────────────────
+class _OwnerProductDialogContent extends StatefulWidget {
+  final bool isEdit;
+  final String restId;
+  final JeebliController ctrl;
+  final Product? product;
+  final TextEditingController nameController;
+  final TextEditingController priceController;
+  final TextEditingController descController;
+  final TextEditingController imageController;
+  final TextEditingController discountController;
+  final TextEditingController percentageController;
+  final TextEditingController newCategoryController;
+  final List<String> initialCategories;
+  final String initSelectedCat;
+
+  const _OwnerProductDialogContent({
+    required this.isEdit,
+    required this.restId,
+    required this.ctrl,
+    this.product,
+    required this.nameController,
+    required this.priceController,
+    required this.descController,
+    required this.imageController,
+    required this.discountController,
+    required this.percentageController,
+    required this.newCategoryController,
+    required this.initialCategories,
+    required this.initSelectedCat,
+  });
+
+  @override
+  State<_OwnerProductDialogContent> createState() => _OwnerProductDialogContentState();
+}
+
+class _OwnerProductDialogContentState extends State<_OwnerProductDialogContent> {
+  late List<String> _categories;
+  late String _selectedCat;
+
+  @override
+  void initState() {
+    super.initState();
+    _categories = List<String>.from(widget.initialCategories);
+    _selectedCat = widget.initSelectedCat;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          widget.isEdit ? 'تعديل الوجبة ✏️' : 'إضافة وجبة جديدة 🍔',
+          style: const TextStyle(
+            fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _darkInput('اسم الوجبة', widget.nameController),
+              const SizedBox(height: 8),
+              _darkInput('السعر (د.ع)', widget.priceController, type: TextInputType.number),
+              const SizedBox(height: 8),
+              _darkInput('الوصف', widget.descController),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _darkInput('رابط/مسار الصورة', widget.imageController),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    onPressed: () async {
+                      final newUrl = await showImagePickerChoiceGlobal(context);
+                      if (newUrl != null && newUrl.isNotEmpty) {
+                        setState(() => widget.imageController.text = newUrl);
+                      }
+                    },
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.amber),
+                      ),
+                      child: const Icon(Icons.add_a_photo_rounded, color: Colors.amber, size: 20),
+                    ),
+                    tooltip: 'التقط صورة أو اختر من المعرض',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _darkInput(
+                      'نسبة الخصم %',
+                      widget.percentageController,
+                      type: TextInputType.number,
+                      onChanged: (val) {
+                        final pct = double.tryParse(val);
+                        final price = double.tryParse(widget.priceController.text) ?? 0;
+                        if (pct != null && pct > 0 && pct <= 100 && price > 0) {
+                          setState(() {
+                            widget.discountController.text =
+                                (price - (price * (pct / 100))).toStringAsFixed(0);
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _darkInput(
+                      'السعر بعد الخصم (د.ع)',
+                      widget.discountController,
+                      type: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // ── اختيار / إضافة / حذف الأقسام ──
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.category_outlined, color: Colors.amber, size: 16),
+                        const SizedBox(width: 6),
+                        const Text('القسم', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                        const Spacer(),
+                        // زر إضافة قسم
+                        InkWell(
+                          onTap: () {
+                            widget.newCategoryController.clear();
+                            showDialog(
+                              context: context,
+                              builder: (ctx2) => Directionality(
+                                textDirection: TextDirection.rtl,
+                                child: AlertDialog(
+                                  backgroundColor: const Color(0xFF1E293B),
+                                  title: const Text('قسم جديد', style: TextStyle(color: Colors.white)),
+                                  content: TextField(
+                                    controller: widget.newCategoryController,
+                                    style: const TextStyle(color: Colors.white),
+                                    autofocus: true,
+                                    decoration: const InputDecoration(
+                                      hintText: 'مثال: عصائر، مشويات...',
+                                      hintStyle: TextStyle(color: Colors.white38),
+                                      enabledBorder: UnderlineInputBorder(
+                                        borderSide: BorderSide(color: Colors.amber),
+                                      ),
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx2),
+                                      child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black),
+                                      onPressed: () {
+                                        final newCat = widget.newCategoryController.text.trim();
+                                        if (newCat.isNotEmpty) {
+                                          setState(() {
+                                            if (!_categories.contains(newCat)) {
+                                              _categories.add(newCat);
+                                            }
+                                            _selectedCat = newCat;
+                                          });
+                                          widget.ctrl.updateRestaurantDetails(
+                                            widget.restId,
+                                            customCategories: List<String>.from(_categories),
+                                          );
+                                        }
+                                        Navigator.pop(ctx2);
+                                      },
+                                      child: const Text('إضافة'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.amber.withOpacity(0.5)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.add, color: Colors.amber, size: 14),
+                                SizedBox(width: 4),
+                                Text('قسم جديد', style: TextStyle(color: Colors.amber, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_categories.isNotEmpty && _selectedCat.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          // زر حذف القسم المحدد
+                          InkWell(
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (ctx3) => Directionality(
+                                  textDirection: TextDirection.rtl,
+                                  child: AlertDialog(
+                                    backgroundColor: const Color(0xFF1E293B),
+                                    title: const Text('حذف القسم ⚠️', style: TextStyle(color: Colors.redAccent)),
+                                    content: Text(
+                                      'حذف "$_selectedCat"؟',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx3),
+                                        child: const Text('إلغاء'),
+                                      ),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                                        onPressed: () {
+                                          setState(() {
+                                            _categories.remove(_selectedCat);
+                                            _selectedCat = _categories.isNotEmpty ? _categories.first : '';
+                                          });
+                                          widget.ctrl.updateRestaurantDetails(
+                                            widget.restId,
+                                            customCategories: List<String>.from(_categories),
+                                          );
+                                          Navigator.pop(ctx3);
+                                        },
+                                        child: const Text('احذف', style: TextStyle(color: Colors.white)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
+                              ),
+                              child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 14),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_categories.isEmpty)
+                      const Text(
+                        'لا توجد أقسام بعد — اضغط "قسم جديد" لإضافة قسم',
+                        style: TextStyle(color: Colors.amber, fontSize: 12),
+                      )
+                    else
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: _categories.map((cat) {
+                          final isSel = _selectedCat == cat;
+                          return GestureDetector(
+                            onTap: () => setState(() => _selectedCat = cat),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: isSel ? Colors.amber : const Color(0xFF334155),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: isSel ? Colors.amber : Colors.white24),
+                              ),
+                              child: Text(
+                                cat,
+                                style: TextStyle(
+                                  color: isSel ? Colors.black : Colors.white,
+                                  fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF8F00),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              final name = widget.nameController.text.trim();
+              final price = double.tryParse(widget.priceController.text) ?? 0;
+              if (name.isEmpty || price <= 0) return;
+              final discount = double.tryParse(widget.discountController.text);
+              final imageUrl = widget.imageController.text.trim().isEmpty
+                  ? 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&q=80'
+                  : widget.imageController.text.trim();
+              final catId = _selectedCat.isNotEmpty ? _selectedCat : (_categories.isNotEmpty ? _categories.first : '');
+
+              if (widget.isEdit) {
+                widget.ctrl.updateProduct(
+                  widget.product!.id,
+                  name: name,
+                  price: price,
+                  discountPrice: discount,
+                  description: widget.descController.text.trim(),
+                  imageUrl: imageUrl,
+                  categoryId: catId,
+                  clearDiscount: widget.discountController.text.isEmpty,
+                );
+              } else {
+                widget.ctrl.addProduct(
+                  Product(
+                    id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
+                    restaurantId: widget.restId,
+                    categoryId: catId,
+                    name: name,
+                    description: widget.descController.text.trim(),
+                    price: price,
+                    discountPrice: discount,
+                    imageUrl: imageUrl,
+                  ),
+                );
+              }
+              Navigator.pop(context);
+            },
+            child: Text(widget.isEdit ? 'حفظ التعديلات' : 'إضافة الوجبة'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 void _showOwnerProductDialog(
   BuildContext context,
   JeebliController ctrl,
@@ -11706,14 +12068,14 @@ void _showOwnerProductDialog(
   final isEdit = product != null;
   final nameController = TextEditingController(text: product?.name ?? '');
   final priceController = TextEditingController(
-    text: product?.price.toString() ?? '',
+    text: product?.price != null ? product!.price.toStringAsFixed(0) : '',
   );
   final descController = TextEditingController(
     text: product?.description ?? '',
   );
   final imageController = TextEditingController(text: product?.imageUrl ?? '');
   final discountController = TextEditingController(
-    text: product?.discountPrice?.toString() ?? '',
+    text: product?.discountPrice?.toStringAsFixed(0) ?? '',
   );
   final percentageController = TextEditingController(
     text: (product?.discountPrice != null && (product?.price ?? 0) > 0)
@@ -11721,300 +12083,49 @@ void _showOwnerProductDialog(
               .toStringAsFixed(0)
         : '',
   );
-
-  final restList = ctrl.allRestaurants.where((r) => r.id == restId).toList();
-  final rest = restList.isNotEmpty ? restList.first : null;
-  List<String> allowedCategories = List<String>.from(rest?.customCategories ?? []);
-      
-  String? selectedCategory = product?.categoryId;
-  if (selectedCategory == null || selectedCategory.isEmpty) {
-    if (initialCategory != null && initialCategory != 'الكل') {
-      selectedCategory = initialCategory;
-    } else if (allowedCategories.isNotEmpty) {
-      selectedCategory = allowedCategories.first;
-    }
-  }
-  
-  if (selectedCategory != null && selectedCategory.isNotEmpty && !allowedCategories.contains(selectedCategory)) {
-    allowedCategories.add(selectedCategory);
-  }
-  
   final newCategoryController = TextEditingController();
 
+  // Get restaurant categories safely
+  final restMatch = ctrl.allRestaurants.where((r) => r.id == restId).toList();
+  final List<String> initialCategories = restMatch.isNotEmpty
+      ? List<String>.from(restMatch.first.customCategories)
+      : [];
+
+  // Determine initial selected category
+  String initSelectedCat = '';
+  if (product?.categoryId != null && product!.categoryId.isNotEmpty) {
+    initSelectedCat = product.categoryId;
+    if (!initialCategories.contains(initSelectedCat)) {
+      initialCategories.add(initSelectedCat);
+    }
+  } else if (initialCategory != null && initialCategory != 'الكل' && initialCategory.isNotEmpty) {
+    initSelectedCat = initialCategory;
+    if (!initialCategories.contains(initSelectedCat)) {
+      initialCategories.add(initSelectedCat);
+    }
+  } else if (initialCategories.isNotEmpty) {
+    initSelectedCat = initialCategories.first;
+  }
 
   showDialog(
     context: context,
     builder: (ctx) => StatefulBuilder(
-      builder: (context, setState) {
-        return Directionality(
-          textDirection: TextDirection.rtl,
-          child: AlertDialog(
-            backgroundColor: const Color(0xFF1E293B),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(
-              isEdit ? 'تعديل الوجبة ✏️' : 'إضافة وجبة جديدة 🍔',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: context.dynamicWhite,
-              ),
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _darkInput('اسم الوجبة', nameController),
-                  const SizedBox(height: 8),
-                  _darkInput(
-                    'السعر (د.ع)',
-                    priceController,
-                    type: TextInputType.number,
-                  ),
-                  const SizedBox(height: 8),
-                  _darkInput('الوصف', descController),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _darkInput(
-                          'صورة الوجبة (رابط أو ملف)',
-                          imageController,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      IconButton(
-                        onPressed: () async {
-                          final newUrl = await showImagePickerChoiceGlobal(context);
-                          if (newUrl != null && newUrl.isNotEmpty) {
-                            setState(() => imageController.text = newUrl);
-                          }
-                        },
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.amber),
-                          ),
-                          child: Icon(
-                            Icons.add_a_photo_rounded,
-                            color: Colors.amber,
-                            size: 20,
-                          ),
-                        ),
-                        tooltip: 'اختر صورة من الكاميرا أو المعرض',
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _darkInput(
-                          'نسبة الخصم % (1-100)',
-                          percentageController,
-                          type: TextInputType.number,
-                          onChanged: (val) {
-                            final pct = double.tryParse(val);
-                            final price =
-                                double.tryParse(priceController.text) ?? 0;
-                            if (pct != null &&
-                                pct > 0 &&
-                                pct <= 100 &&
-                                price > 0) {
-                              final newPrice = price - (price * (pct / 100));
-                              setState(() {
-                                discountController.text = newPrice
-                                    .toStringAsFixed(0);
-                              });
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _darkInput(
-                          'السعر بعد الخصم (د.ع)',
-                          discountController,
-                          type: TextInputType.number,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: allowedCategories.contains(selectedCategory) ? selectedCategory : allowedCategories.first,
-                          dropdownColor: const Color(0xFF334155),
-                          style: TextStyle(color: context.dynamicWhite),
-                          decoration: InputDecoration(
-                            labelText: 'القسم',
-                            labelStyle: TextStyle(color: context.dynamicWhite70),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: const BorderSide(color: Colors.white24),
-                            ),
-                            filled: true,
-                            fillColor: context.dynamicWhite.withOpacity(0.05),
-                          ),
-                          items: allowedCategories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                          onChanged: (val) {
-                            if (val != null) {
-                              setState(() => selectedCategory = val);
-                            }
-                          },
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle, color: Color(0xFFFF8F00), size: 30),
-                        tooltip: 'إضافة قسم جديد',
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (ctx2) => AlertDialog(
-                              backgroundColor: const Color(0xFF1E293B),
-                              title: Text('قسم جديد', style: TextStyle(color: Colors.white)),
-                              content: TextField(
-                                controller: newCategoryController,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: const InputDecoration(
-                                  hintText: 'اسم القسم (مثال: عصائر)',
-                                  hintStyle: TextStyle(color: Colors.white54),
-                                ),
-                              ),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx2), child: Text('إلغاء')),
-                                ElevatedButton(
-                                  onPressed: () {
-                                    if (newCategoryController.text.trim().isNotEmpty) {
-                                      final newCat = newCategoryController.text.trim();
-                                      setState(() {
-                                        if (!allowedCategories.contains(newCat)) {
-                                          allowedCategories.add(newCat);
-                                        }
-                                        selectedCategory = newCat;
-                                      });
-                                      if (restId.isNotEmpty) {
-                                        ctrl.updateRestaurantDetails(restId, customCategories: allowedCategories);
-                                      }
-                                    }
-                                    Navigator.pop(ctx2);
-                                  },
-                                  child: Text('إضافة'),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 28),
-                        tooltip: 'حذف القسم المحدد',
-                        onPressed: () {
-                          if (allowedCategories.length <= 1) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('لا يمكن حذف القسم الأخير!'), backgroundColor: Colors.red)
-                            );
-                            return;
-                          }
-                          showDialog(
-                            context: context,
-                            builder: (ctx3) => Directionality(
-                              textDirection: TextDirection.rtl,
-                              child: AlertDialog(
-                                backgroundColor: const Color(0xFF1E293B),
-                                title: const Text('تأكيد الحذف ⚠️', style: TextStyle(color: Colors.redAccent)),
-                                content: Text(
-                                  'هل أنت متأكد من حذف قسم "$selectedCategory"؟\n\nتنبيه: إذا قمت بحذفه، ستبقى الوجبات التابعة له موجودة ولكن قد لا تظهر في الأقسام بشكل صحيح للزبائن!',
-                                  style: const TextStyle(color: Colors.white)
-                                ),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(ctx3), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-                                    onPressed: () {
-                                      setState(() {
-                                        allowedCategories.remove(selectedCategory);
-                                        selectedCategory = allowedCategories.first;
-                                      });
-                                      if (restId.isNotEmpty) {
-                                        ctrl.updateRestaurantDetails(restId, customCategories: allowedCategories);
-                                      }
-                                      Navigator.pop(ctx3);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('تم حذف القسم بنجاح'), backgroundColor: Colors.green)
-                                      );
-                                    },
-                                    child: const Text('نعم، احذف', style: TextStyle(color: Colors.white)),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: Text(
-                  'إلغاء',
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  final price = double.tryParse(priceController.text) ?? 0.0;
-                  final discount = double.tryParse(discountController.text);
-                  if (nameController.text.trim().isEmpty || price <= 0) {
-                    return;
-                  }
-                  final imageUrl = imageController.text.trim().isEmpty
-                      ? 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&q=80'
-                      : imageController.text.trim();
-
-                  if (isEdit) {
-                    ctrl.updateProduct(
-                      product.id,
-                      name: nameController.text.trim(),
-                      price: price,
-                      discountPrice: discount,
-                      description: descController.text.trim(),
-                      imageUrl: imageUrl,
-                      categoryId: selectedCategory ?? '',
-                      clearDiscount: discountController.text.isEmpty,
-                    );
-                  } else {
-                    ctrl.addProduct(
-                      Product(
-                        id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
-                        restaurantId: restId,
-                        categoryId: selectedCategory ?? '',
-                        name: nameController.text.trim(),
-                        description: descController.text.trim(),
-                        price: price,
-                        discountPrice: discount,
-                        imageUrl: imageUrl,
-                      ),
-                    );
-                  }
-                  Navigator.pop(ctx);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF8F00),
-                  foregroundColor: context.dynamicWhite,
-                ),
-                child: Text(isEdit ? 'حفظ التعديلات' : 'إضافة الآن'),
-              ),
-            ],
-          ),
+      builder: (dialogCtx, setDState) {
+        // Use local state variables inside dialog
+        return _OwnerProductDialogContent(
+          isEdit: isEdit,
+          restId: restId,
+          ctrl: ctrl,
+          product: product,
+          nameController: nameController,
+          priceController: priceController,
+          descController: descController,
+          imageController: imageController,
+          discountController: discountController,
+          percentageController: percentageController,
+          newCategoryController: newCategoryController,
+          initialCategories: initialCategories,
+          initSelectedCat: initSelectedCat,
         );
       },
     ),
